@@ -1,4 +1,4 @@
 ---
-name: Home Assistant App: JKBMS2MQTT 
+name: "Home Assistant App: JKBMS2MQTT" 
 url: https://github.com/basmeerman/jkbms2mqtt
 maintainer: basmeerman <basmeerman@users.noreply.github.com>
