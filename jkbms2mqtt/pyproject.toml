@@ -14,12 +14,10 @@ dependencies = [
     "aiomqtt>=2.3.0",
     "pydantic>=2.7.0",
     "pyyaml>=6.0",
+    "pymodbus[serial]>=3.7.0",
 ]
 
 [project.optional-dependencies]
-serial = ["pyserial-asyncio-fast>=0.16"]
-can = ["python-can>=4.4"]
-all = ["pyserial-asyncio-fast>=0.16", "python-can>=4.4"]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
@@ -28,8 +26,6 @@ dev = [
     "mutmut>=3.0",
     "ruff>=0.5",
     "mypy>=1.10",
-    "pyserial-asyncio-fast>=0.16",
-    "python-can>=4.4",
     "types-PyYAML>=6.0",
 ]
 
@@ -104,7 +100,7 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["PLR2004", "S101", "E501", "PLW2901", "E741"]
-"src/jkbms2mqtt/registers.py" = ["E501"]
+"src/jkbms2mqtt/protocol/jk_settings.py" = ["E501"]
 "src/jkbms2mqtt/entities.py" = ["E501"]
 
 [tool.mypy]

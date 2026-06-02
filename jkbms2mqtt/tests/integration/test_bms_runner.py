@@ -1,0 +1,476 @@
+"""End-to-end BmsRunner tests against a fake pymodbus client.
+
+A real pymodbus.server would tie us to the library's internals; instead we
+use a small fake client that returns canned register data. This still
+exercises every code path in BmsRunner — the contract is the
+read_holding_registers signature, which is pymodbus' own public API.
+"""
+
+from __future__ import annotations
+
+import asyncio
+from dataclasses import dataclass, field
+from typing import Any
+
+import pytest
+
+from jkbms2mqtt.bms_runner import (
+    BASE_INFO,
+    BLOCK_A_COUNT,
+    BLOCK_B_COUNT,
+    BLOCK_B_OFFSET,
+    BLOCK_C_COUNT,
+    BLOCK_C_OFFSET,
+    BmsRunner,
+)
+from jkbms2mqtt.config import Settings, Transport
+from jkbms2mqtt.protocol.jk_modbus import BASE_RT, INFO_BLOCK_WORDS
+
+# -- Fake client + helpers --------------------------------------------------------------
+
+
+@dataclass
+class FakeResponse:
+    registers: list[int] = field(default_factory=list)
+    error: bool = False
+
+    def isError(self) -> bool:
+        return self.error
+
+
+@dataclass
+class FakeClient:
+    """Returns canned responses keyed on (slave_id, address) → list of regs."""
+
+    map: dict[tuple[int, int], FakeResponse] = field(default_factory=dict)
+    # If a key is not found, behaviour is controlled by:
+    miss: Any = None  # FakeResponse, Exception, or None
+
+    calls: list[tuple[int, int, int]] = field(default_factory=list)
+
+    async def read_holding_registers(
+        self, *, address: int, count: int, device_id: int
+    ) -> Any:
+        self.calls.append((device_id, address, count))
+        key = (device_id, address)
+        if key in self.map:
+            r = self.map[key]
+            return FakeResponse(
+                registers=list(r.registers)[:count]
+                + [0] * max(0, count - len(r.registers)),
+                error=r.error,
+            )
+        if isinstance(self.miss, Exception):
+            raise self.miss
+        if isinstance(self.miss, FakeResponse):
+            return self.miss
+        return FakeResponse(error=True)
+
+
+@dataclass
+class PublishCapture:
+    log: list[tuple[str, str, int, bool]] = field(default_factory=list)
+
+    async def __call__(self, topic: str, payload: str, qos: int, retain: bool) -> None:
+        self.log.append((topic, payload, qos, retain))
+
+
+def _settings(**overrides: Any) -> Settings:
+    base = {
+        "transport": Transport.TCP_GATEWAY,
+        "gateway_host": "x.x.x.x",
+        "gateway_port": 502,
+        "poll_interval_s": 1.0,
+    }
+    base.update(overrides)
+    return Settings(**base)
+
+
+def _block_a_for_pack_at(*, voltage_v: float, soc: int, cell_count: int = 16) -> list[int]:
+    """Build a 120-register block A with cells, total V, total I, SoC etc."""
+    regs = [0] * BLOCK_A_COUNT
+    # Cell-present bitmap: cells 1..cell_count.
+    mask = (1 << cell_count) - 1
+    regs[0x20] = (mask >> 16) & 0xFFFF
+    regs[0x21] = mask & 0xFFFF
+    # Cell voltages: all at 3300 mV.
+    for i in range(cell_count):
+        regs[i] = 3300
+    # MOSFET temp 25.0 °C
+    regs[0x45] = 250
+    # Total voltage (mV)
+    mv = int(round(voltage_v * 1000))
+    regs[0x48] = (mv >> 16) & 0xFFFF
+    regs[0x49] = mv & 0xFFFF
+    # Total current 0
+    regs[0x4C] = 0
+    regs[0x4D] = 0
+    # Probe 1 / 2 temps 24.0 / 24.5
+    regs[0x4E] = 240
+    regs[0x4F] = 245
+    # Balance state + SoC: balance=0, SoC=soc
+    regs[0x53] = soc
+    # Charge|discharge enabled
+    regs[0x60] = (1 << 8) | 1
+    return regs
+
+
+def _info_block(*, model: str = "JK-PB2A16S15P", sw: str = "SW1209HE") -> list[int]:
+    """Pack model/hw/sw/serial into an INFO block."""
+    regs = [0] * INFO_BLOCK_WORDS
+
+    def _pack(off: int, text: str, length_bytes: int) -> None:
+        encoded = text.encode("ascii")[:length_bytes].ljust(length_bytes, b"\x00")
+        for i in range(length_bytes // 2):
+            regs[off + i] = (encoded[2 * i] << 8) | encoded[2 * i + 1]
+
+    _pack(0x00, model, 16)
+    _pack(0x08, "HW10A20H", 8)
+    _pack(0x0C, sw, 8)
+    _pack(0x28, "JK202401012345", 16)
+    return regs
+
+
+# -- Tests --------------------------------------------------------------------------
+
+
+async def test_first_cycle_publishes_discovery_state_and_static_info() -> None:
+    client = FakeClient(
+        map={
+            (1, BASE_RT): FakeResponse(registers=_block_a_for_pack_at(voltage_v=53.0, soc=75)),
+            (1, BASE_RT + BLOCK_B_OFFSET): FakeResponse(registers=[0] * BLOCK_B_COUNT),
+            (1, BASE_RT + BLOCK_C_OFFSET): FakeResponse(registers=[0] * BLOCK_C_COUNT),
+            (1, BASE_INFO): FakeResponse(registers=_info_block()),
+        }
+    )
+    pub = PublishCapture()
+    runner = BmsRunner(
+        client=client,  # type: ignore[arg-type]
+        settings=_settings(),
+        slave_addr=1,
+        bms_name="BMS_1",
+        publish=pub,
+    )
+    await runner.announce_discovery()
+    await runner._poll_once()
+
+    topics = [t for t, _, _, _ in pub.log]
+    # Discovery topic shape: homeassistant/sensor/BMS_1_device_<obj>/config
+    assert any("BMS_1_device_total_voltage/config" in t for t in topics)
+    # State
+    assert ("BMS_1/Total_Voltage_V", "53.000", 0, False) in pub.log
+    assert ("BMS_1/SOC_percentage", "75", 0, False) in pub.log
+    # Static info
+    assert ("BMS_1/bms", "JK-PB2A16S15P", 0, True) in pub.log
+
+
+async def test_six_bms_each_publishes_independently() -> None:
+    """Closes the 'only BMS_5 works' bug: 6 BMSes → 6 distinct device topics."""
+    client = FakeClient(
+        map={
+            (sid, BASE_RT): FakeResponse(
+                registers=_block_a_for_pack_at(voltage_v=53.0 + sid * 0.01, soc=70 + sid)
+            )
+            for sid in range(1, 7)
+        }
+    )
+    # Block B / C / INFO miss → graceful (defaults to error response)
+    pub = PublishCapture()
+    runners = [
+        BmsRunner(
+            client=client,  # type: ignore[arg-type]
+            settings=_settings(),
+            slave_addr=sid,
+            bms_name=f"BMS_{sid}",
+            publish=pub,
+        )
+        for sid in range(1, 7)
+    ]
+    for r in runners:
+        await r._poll_once()
+
+    topics = {t for t, _, _, _ in pub.log}
+    # Each BMS has its own Total_Voltage_V publish.
+    for sid in range(1, 7):
+        assert f"BMS_{sid}/Total_Voltage_V" in topics
+
+
+async def test_block_b_failure_does_not_block_publish() -> None:
+    client = FakeClient(
+        map={
+            (1, BASE_RT): FakeResponse(registers=_block_a_for_pack_at(voltage_v=53.0, soc=50)),
+            # Block B + C miss → FakeResponse(error=True)
+        },
+        miss=FakeResponse(error=True),
+    )
+    pub = PublishCapture()
+    runner = BmsRunner(
+        client=client,  # type: ignore[arg-type]
+        settings=_settings(),
+        slave_addr=1,
+        bms_name="BMS_1",
+        publish=pub,
+    )
+    await runner._poll_once()
+    assert any(t == "BMS_1/Total_Voltage_V" for t, _, _, _ in pub.log)
+
+
+async def test_block_a_failure_skips_publish() -> None:
+    client = FakeClient(map={}, miss=FakeResponse(error=True))
+    pub = PublishCapture()
+    runner = BmsRunner(
+        client=client,  # type: ignore[arg-type]
+        settings=_settings(),
+        slave_addr=1,
+        bms_name="BMS_1",
+        publish=pub,
+    )
+    await runner._poll_once()
+    # Nothing published from state — but no crash either.
+    state_topics = [t for t, _, q, _ in pub.log if q == 0]
+    assert not any(t == "BMS_1/Total_Voltage_V" for t in state_topics)
+
+
+async def test_block_a_connection_error_caught() -> None:
+    client = FakeClient(map={}, miss=ConnectionError("dropped"))
+    pub = PublishCapture()
+    runner = BmsRunner(
+        client=client,  # type: ignore[arg-type]
+        settings=_settings(),
+        slave_addr=1,
+        bms_name="BMS_1",
+        publish=pub,
+    )
+    await runner._poll_once()
+    # Connection error during block A → poll returns silently.
+
+
+async def test_block_b_connection_error_does_not_crash() -> None:
+    """Block B failure must not abort the cycle."""
+    # Use a custom client that fails only on block B address.
+    @dataclass
+    class _Client:
+        called: list[tuple[int, int]] = field(default_factory=list)
+
+        async def read_holding_registers(
+            self, *, address: int, count: int, device_id: int
+        ) -> Any:
+            self.called.append((device_id, address))
+            if address == BASE_RT:
+                return FakeResponse(registers=_block_a_for_pack_at(voltage_v=53.0, soc=50))
+            if address == BASE_RT + BLOCK_B_OFFSET:
+                raise ConnectionError("block B dropped")
+            if address == BASE_RT + BLOCK_C_OFFSET:
+                return FakeResponse(registers=[0] * BLOCK_C_COUNT)
+            return FakeResponse(error=True)
+
+    client = _Client()
+    pub = PublishCapture()
+    runner = BmsRunner(
+        client=client,  # type: ignore[arg-type]
+        settings=_settings(),
+        slave_addr=1,
+        bms_name="BMS_1",
+        publish=pub,
+    )
+    await runner._poll_once()
+    assert any(t == "BMS_1/Total_Voltage_V" for t, _, _, _ in pub.log)
+
+
+async def test_block_c_connection_error_does_not_crash() -> None:
+    @dataclass
+    class _Client:
+        async def read_holding_registers(
+            self, *, address: int, count: int, device_id: int
+        ) -> Any:
+            if address == BASE_RT:
+                return FakeResponse(registers=_block_a_for_pack_at(voltage_v=53.0, soc=50))
+            if address == BASE_RT + BLOCK_C_OFFSET:
+                raise ConnectionError("block C dropped")
+            return FakeResponse(registers=[0] * 50)
+
+    runner = BmsRunner(
+        client=_Client(),  # type: ignore[arg-type]
+        settings=_settings(),
+        slave_addr=1,
+        bms_name="BMS_1",
+        publish=PublishCapture(),
+    )
+    await runner._poll_once()
+
+
+async def test_static_info_read_error_does_not_block_state() -> None:
+    @dataclass
+    class _Client:
+        async def read_holding_registers(
+            self, *, address: int, count: int, device_id: int
+        ) -> Any:
+            if address == BASE_INFO:
+                raise TimeoutError("info read slow")
+            if address == BASE_RT:
+                return FakeResponse(registers=_block_a_for_pack_at(voltage_v=53.0, soc=50))
+            return FakeResponse(registers=[0] * count)
+
+    pub = PublishCapture()
+    runner = BmsRunner(
+        client=_Client(),  # type: ignore[arg-type]
+        settings=_settings(),
+        slave_addr=1,
+        bms_name="BMS_1",
+        publish=pub,
+    )
+    await runner._poll_once()
+    # State published; static info did not crash.
+    assert any(t == "BMS_1/Total_Voltage_V" for t, _, _, _ in pub.log)
+    # No 'bms' static-info topic published.
+    assert not any(t == "BMS_1/bms" for t, _, _, _ in pub.log)
+
+
+async def test_static_info_modbus_error_skipped() -> None:
+    @dataclass
+    class _Client:
+        async def read_holding_registers(
+            self, *, address: int, count: int, device_id: int
+        ) -> Any:
+            if address == BASE_INFO:
+                return FakeResponse(error=True)
+            if address == BASE_RT:
+                return FakeResponse(registers=_block_a_for_pack_at(voltage_v=53.0, soc=50))
+            return FakeResponse(registers=[0] * count)
+
+    pub = PublishCapture()
+    runner = BmsRunner(
+        client=_Client(),  # type: ignore[arg-type]
+        settings=_settings(),
+        slave_addr=1,
+        bms_name="BMS_1",
+        publish=pub,
+    )
+    await runner._poll_once()
+    assert not any(t == "BMS_1/bms" for t, _, _, _ in pub.log)
+
+
+async def test_static_info_published_only_once() -> None:
+    client = FakeClient(
+        map={
+            (1, BASE_RT): FakeResponse(registers=_block_a_for_pack_at(voltage_v=53.0, soc=50)),
+            (1, BASE_INFO): FakeResponse(registers=_info_block()),
+        }
+    )
+    pub = PublishCapture()
+    runner = BmsRunner(
+        client=client,  # type: ignore[arg-type]
+        settings=_settings(),
+        slave_addr=1,
+        bms_name="BMS_1",
+        publish=pub,
+    )
+    await runner._poll_once()
+    await runner._poll_once()
+    bms_topic_count = sum(1 for t, _, _, _ in pub.log if t == "BMS_1/bms")
+    assert bms_topic_count == 1
+
+
+async def test_announce_discovery_idempotent() -> None:
+    client = FakeClient(map={})
+    pub = PublishCapture()
+    runner = BmsRunner(
+        client=client,  # type: ignore[arg-type]
+        settings=_settings(),
+        slave_addr=1,
+        bms_name="BMS_1",
+        publish=pub,
+    )
+    await runner.announce_discovery()
+    first_count = len(pub.log)
+    await runner.announce_discovery()
+    assert len(pub.log) == first_count  # second call is a no-op
+
+
+async def test_cell_count_change_republishes_discovery() -> None:
+    """If the BMS reports a different cell count, discovery is re-emitted."""
+    # First poll: 8 cells. Second poll: 16 cells.
+    client = FakeClient(
+        map={
+            (1, BASE_RT): FakeResponse(
+                registers=_block_a_for_pack_at(voltage_v=26.0, soc=50, cell_count=8)
+            ),
+        }
+    )
+    pub = PublishCapture()
+    runner = BmsRunner(
+        client=client,  # type: ignore[arg-type]
+        settings=_settings(),
+        slave_addr=1,
+        bms_name="BMS_1",
+        publish=pub,
+    )
+    await runner.announce_discovery()  # initial: cell_count=16 default
+    # Snapshot count of discovery topics so we can detect re-announce.
+    discovery_count_before = sum(
+        1 for t, _, _, r in pub.log if r and t.endswith("/config")
+    )
+    await runner._poll_once()  # detects cell_count=8 → re-announces
+    discovery_count_after = sum(
+        1 for t, _, _, r in pub.log if r and t.endswith("/config")
+    )
+    assert discovery_count_after > discovery_count_before
+
+
+# -- poll_loop -------------------------------------------------------------------------
+
+
+async def test_poll_loop_runs_then_cancels() -> None:
+    """The poll_loop must publish at least once and cleanly accept cancellation."""
+    client = FakeClient(
+        map={
+            (1, BASE_RT): FakeResponse(registers=_block_a_for_pack_at(voltage_v=53.0, soc=50)),
+        }
+    )
+    pub = PublishCapture()
+    runner = BmsRunner(
+        client=client,  # type: ignore[arg-type]
+        settings=_settings(poll_interval_s=1.0),
+        slave_addr=1,
+        bms_name="BMS_1",
+        publish=pub,
+    )
+    task = asyncio.create_task(runner.poll_loop())
+    for _ in range(100):
+        if any(t == "BMS_1/Total_Voltage_V" for t, _, _, _ in pub.log):
+            break
+        await asyncio.sleep(0.01)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert any(t == "BMS_1/Total_Voltage_V" for t, _, _, _ in pub.log)
+
+
+async def test_poll_loop_keeps_running_on_block_a_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ConnectionError during a poll must not exit the loop."""
+    client = FakeClient(map={}, miss=ConnectionError("dropped"))
+    pub = PublishCapture()
+    runner = BmsRunner(
+        client=client,  # type: ignore[arg-type]
+        settings=_settings(poll_interval_s=1.0),
+        slave_addr=1,
+        bms_name="BMS_1",
+        publish=pub,
+    )
+    real_sleep = asyncio.sleep
+
+    async def fast_sleep(d: float) -> None:
+        if d >= 0.5:
+            await real_sleep(0)
+        else:
+            await real_sleep(d)
+
+    monkeypatch.setattr("jkbms2mqtt.bms_runner.asyncio.sleep", fast_sleep)
+
+    task = asyncio.create_task(runner.poll_loop())
+    await real_sleep(0.05)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task

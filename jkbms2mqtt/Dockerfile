@@ -19,7 +19,7 @@ RUN if ! command -v python3 >/dev/null 2>&1; then \
 WORKDIR /opt/jkbms2mqtt
 COPY pyproject.toml README.md ./
 COPY src ./src
-RUN pip install ".[all]"
+RUN pip install "."
 
 COPY run.sh /run.sh
 RUN chmod a+x /run.sh

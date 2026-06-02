@@ -1,17 +1,18 @@
-"""Declarative entity table — the single source of truth for every MQTT entity.
+"""Declarative entity table — single source of truth for every MQTT entity.
 
-This is consumed by:
-- `mqtt.py` for HA Discovery payload generation
-- `mqtt.py` for state publishing on decoded frames
-- the README and `MIGRATION.md` for the rename mapping
-- the test suite for "every entity has unit/class/scale" guard tests
+Consumed by:
 
-Each `ReadOnlyEntity` maps a field in a decoded `LiveData` / `SetupData` / `FixedData`
-object to its MQTT topic suffix. Each `WritableEntity` references a
-`RegisterDef` (or `PackedBitDef`) and inherits its tier from there.
+- ``mqtt.py`` for HA Discovery payload generation
+- ``mqtt.py`` for state publishing
+- Tests for invariant checks
 
-The `legacy_french_topic` field records an older French topic name for users
-porting from a French-locale solution; see `MIGRATION.md` for the rewrite map.
+Each ``ReadOnlyEntity`` maps a JkRealtime / JkStaticInfo attribute to a topic
+suffix appended to ``<bms_name>/``. Each ``WritableEntity`` references a
+``RegisterDef`` (or ``PackedBitDef``) and inherits its tier from there.
+
+Topic suffixes follow the convention used by the Jean-Luc-style HA add-on
+that users may be migrating from (e.g. ``Total_Voltage_V``, ``Cell_1_volt``,
+``Mos_temp``) so existing dashboards and automations work unchanged.
 """
 
 from __future__ import annotations
@@ -20,10 +21,11 @@ from dataclasses import dataclass
 from enum import Enum, unique
 from typing import Final
 
-from jkbms2mqtt.protocol.registers import (
+from jkbms2mqtt.protocol.jk_settings import (
     BASIC_REGISTERS,
     PACKED_BITS,
     SAFETY_REGISTERS,
+    Encoding,
     PackedBitDef,
     RegisterDef,
 )
@@ -31,43 +33,36 @@ from jkbms2mqtt.protocol.registers import (
 
 @unique
 class Component(str, Enum):
-    """The HA Discovery component types we use."""
-
     SENSOR = "sensor"
     BINARY_SENSOR = "binary_sensor"
     NUMBER = "number"
     SWITCH = "switch"
-    SELECT = "select"
 
 
 @dataclass(frozen=True, slots=True)
 class ReadOnlyEntity:
-    """A telemetry entity: BMS data is decoded and published, no writes."""
+    """A telemetry entity. ``source_field`` is the attribute name on the decoded
+    dataclass (``JkRealtime`` or ``JkStaticInfo``)."""
 
-    object_id: str  # snake_case HA discovery object_id
-    topic_suffix: str  # appended to `<bms_name>/`
-    source_field: str  # attribute name on LiveData / SetupData / FixedData
+    object_id: str               # snake_case
+    topic_suffix: str            # appended to `<bms_name>/`
+    source_field: str
     component: Component
     device_class: str | None
     state_class: str | None
     unit_of_measurement: str | None
-    legacy_french_topic: str | None
     description: str
 
 
 @dataclass(frozen=True, slots=True)
 class WritableEntity:
-    """A writable entity backed by a single register (function 0x10)."""
+    """A writable parameter backed by a single 32-bit register (function 0x10)."""
 
     object_id: str
-    topic_suffix: str  # always `control/<param>`
+    topic_suffix: str            # always `control/<name>`
     register: RegisterDef
     component: Component
     description: str
-
-    @property
-    def legacy_french_topic(self) -> str | None:
-        return None  # writable entities never had French names in v3.x
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,18 +70,12 @@ class PackedBitEntity:
     """A writable boolean stored as one bit inside the packed register 0x1114."""
 
     object_id: str
-    topic_suffix: str
+    topic_suffix: str            # always `control/<name>`
     bit: PackedBitDef
     component: Component = Component.SWITCH
 
-    @property
-    def legacy_french_topic(self) -> str | None:
-        return None
 
-
-# ---------------------------------------------------------------------------------------------
-# Read-only sensor entities (Trame 3 — live data)
-# ---------------------------------------------------------------------------------------------
+# -- Read-only sensors from JkRealtime -------------------------------------------------
 
 LIVE_SENSORS: Final[tuple[ReadOnlyEntity, ...]] = (
     ReadOnlyEntity(
@@ -97,7 +86,6 @@ LIVE_SENSORS: Final[tuple[ReadOnlyEntity, ...]] = (
         device_class="voltage",
         state_class="measurement",
         unit_of_measurement="V",
-        legacy_french_topic="Tension_Totale_volt",
         description="Total pack voltage.",
     ),
     ReadOnlyEntity(
@@ -108,7 +96,6 @@ LIVE_SENSORS: Final[tuple[ReadOnlyEntity, ...]] = (
         device_class="current",
         state_class="measurement",
         unit_of_measurement="A",
-        legacy_french_topic="Courant_total",
         description="Total pack current (negative = discharge).",
     ),
     ReadOnlyEntity(
@@ -119,8 +106,7 @@ LIVE_SENSORS: Final[tuple[ReadOnlyEntity, ...]] = (
         device_class="power",
         state_class="measurement",
         unit_of_measurement="W",
-        legacy_french_topic="Puissance_Totale",
-        description="Total pack power.",
+        description="Total pack power (signed).",
     ),
     ReadOnlyEntity(
         object_id="soc_percentage",
@@ -130,7 +116,6 @@ LIVE_SENSORS: Final[tuple[ReadOnlyEntity, ...]] = (
         device_class="battery",
         state_class="measurement",
         unit_of_measurement="%",
-        legacy_french_topic="SOC_pourcentage",
         description="State of charge.",
     ),
     ReadOnlyEntity(
@@ -141,7 +126,6 @@ LIVE_SENSORS: Final[tuple[ReadOnlyEntity, ...]] = (
         device_class=None,
         state_class="measurement",
         unit_of_measurement="%",
-        legacy_french_topic="SOH_pourcentage",
         description="State of health.",
     ),
     ReadOnlyEntity(
@@ -152,19 +136,17 @@ LIVE_SENSORS: Final[tuple[ReadOnlyEntity, ...]] = (
         device_class=None,
         state_class="measurement",
         unit_of_measurement="Ah",
-        legacy_french_topic="Capacite_restante_Ah",
         description="Remaining battery capacity.",
     ),
     ReadOnlyEntity(
-        object_id="battery_capacity_ah",
+        object_id="nominal_capacity_ah",
         topic_suffix="Battery_Capacity_Ah",
-        source_field="battery_capacity_ah",
+        source_field="nominal_capacity_ah",
         component=Component.SENSOR,
         device_class=None,
         state_class="measurement",
         unit_of_measurement="Ah",
-        legacy_french_topic="Capacite_batterie_Ah",
-        description="Reported full battery capacity.",
+        description="Nominal pack capacity.",
     ),
     ReadOnlyEntity(
         object_id="cycle_count",
@@ -174,19 +156,7 @@ LIVE_SENSORS: Final[tuple[ReadOnlyEntity, ...]] = (
         device_class=None,
         state_class="total_increasing",
         unit_of_measurement=None,
-        legacy_french_topic="Nombre_Cycle",
         description="Charge cycle count.",
-    ),
-    ReadOnlyEntity(
-        object_id="cycle_capacity_ah",
-        topic_suffix="Cycle_Capacity_Ah",
-        source_field="cycle_capacity_ah",
-        component=Component.SENSOR,
-        device_class=None,
-        state_class="total_increasing",
-        unit_of_measurement="Ah",
-        legacy_french_topic="Cycle_Capacite_Ah",
-        description="Total cycle capacity.",
     ),
     ReadOnlyEntity(
         object_id="balance_current",
@@ -196,7 +166,6 @@ LIVE_SENSORS: Final[tuple[ReadOnlyEntity, ...]] = (
         device_class="current",
         state_class="measurement",
         unit_of_measurement="A",
-        legacy_french_topic="Balance_courant",
         description="Cell-balance current.",
     ),
     ReadOnlyEntity(
@@ -207,7 +176,6 @@ LIVE_SENSORS: Final[tuple[ReadOnlyEntity, ...]] = (
         device_class="temperature",
         state_class="measurement",
         unit_of_measurement="°C",
-        legacy_french_topic="Mos_temp",
         description="MOSFET temperature.",
     ),
     ReadOnlyEntity(
@@ -218,7 +186,6 @@ LIVE_SENSORS: Final[tuple[ReadOnlyEntity, ...]] = (
         device_class="temperature",
         state_class="measurement",
         unit_of_measurement="°C",
-        legacy_french_topic="Sonde_1_temp",
         description="Probe 1 temperature.",
     ),
     ReadOnlyEntity(
@@ -229,7 +196,6 @@ LIVE_SENSORS: Final[tuple[ReadOnlyEntity, ...]] = (
         device_class="temperature",
         state_class="measurement",
         unit_of_measurement="°C",
-        legacy_french_topic="Sonde_2_temp",
         description="Probe 2 temperature.",
     ),
     ReadOnlyEntity(
@@ -240,7 +206,6 @@ LIVE_SENSORS: Final[tuple[ReadOnlyEntity, ...]] = (
         device_class="temperature",
         state_class="measurement",
         unit_of_measurement="°C",
-        legacy_french_topic="Sonde_3_temp",
         description="Probe 3 temperature.",
     ),
     ReadOnlyEntity(
@@ -251,178 +216,79 @@ LIVE_SENSORS: Final[tuple[ReadOnlyEntity, ...]] = (
         device_class="temperature",
         state_class="measurement",
         unit_of_measurement="°C",
-        legacy_french_topic="Sonde_4_temp",
         description="Probe 4 temperature.",
+    ),
+    ReadOnlyEntity(
+        object_id="probe_5_temp",
+        topic_suffix="Probe_5_temp",
+        source_field="probe_5_temp_c",
+        component=Component.SENSOR,
+        device_class="temperature",
+        state_class="measurement",
+        unit_of_measurement="°C",
+        description="Probe 5 temperature.",
     ),
     ReadOnlyEntity(
         object_id="total_runtime",
         topic_suffix="Total_runtime",
-        source_field="total_runtime_s",
+        source_field="runtime_s",
         component=Component.SENSOR,
         device_class="duration",
         state_class="total_increasing",
         unit_of_measurement="s",
-        legacy_french_topic="Total_runtime",
         description="Total runtime since BMS power-on.",
-    ),
-    ReadOnlyEntity(
-        object_id="charge_status",
-        topic_suffix="charge_status",
-        source_field="charge_status",
-        component=Component.SENSOR,
-        device_class=None,
-        state_class=None,
-        unit_of_measurement=None,
-        legacy_french_topic="charge_status",
-        description="Charge stage code (0=Bulk, 1=Float, 2=Other).",
-    ),
-    ReadOnlyEntity(
-        object_id="charge_status_time",
-        topic_suffix="charge_status_time",
-        source_field="charge_status_time_s",
-        component=Component.SENSOR,
-        device_class="duration",
-        state_class="total_increasing",
-        unit_of_measurement="s",
-        legacy_french_topic="charge_status_time",
-        description="Time in the current charge stage.",
-    ),
-    ReadOnlyEntity(
-        object_id="heating_current",
-        topic_suffix="Heating_Current",
-        source_field="heating_current_a",
-        component=Component.SENSOR,
-        device_class="current",
-        state_class="measurement",
-        unit_of_measurement="A",
-        legacy_french_topic="Chauffage_courant",
-        description="Heating element current.",
     ),
 )
 
 
-# Binary-sensor entities — boolean live data
+# -- Binary sensors -------------------------------------------------------------------
+
 LIVE_BINARY_SENSORS: Final[tuple[ReadOnlyEntity, ...]] = (
     ReadOnlyEntity(
         object_id="switch_charge",
         topic_suffix="Switch_Charge",
-        source_field="switch_charge",
+        source_field="charge_enabled",
         component=Component.BINARY_SENSOR,
         device_class="power",
         state_class=None,
         unit_of_measurement=None,
-        legacy_french_topic="Switch_Charge",
-        description="Charge MOSFET status (reported).",
+        description="Charge MOSFET state (reported).",
     ),
     ReadOnlyEntity(
         object_id="switch_discharge",
         topic_suffix="Switch_Discharge",
-        source_field="switch_discharge",
+        source_field="discharge_enabled",
         component=Component.BINARY_SENSOR,
         device_class="power",
         state_class=None,
         unit_of_measurement=None,
-        legacy_french_topic="Switch_Decharge",
-        description="Discharge MOSFET status (reported).",
+        description="Discharge MOSFET state (reported).",
     ),
     ReadOnlyEntity(
         object_id="switch_balance",
         topic_suffix="Switch_Balance",
-        source_field="switch_balance",
+        source_field="balance_active",
         component=Component.BINARY_SENSOR,
         device_class=None,
         state_class=None,
         unit_of_measurement=None,
-        legacy_french_topic="Switch_Balance",
         description="Balance state (reported).",
     ),
-    ReadOnlyEntity(
-        object_id="heating",
-        topic_suffix="Heating",
-        source_field="heating",
-        component=Component.BINARY_SENSOR,
-        device_class="heat",
-        state_class=None,
-        unit_of_measurement=None,
-        legacy_french_topic="Chauffage",
-        description="Heating element on/off.",
-    ),
 )
 
 
-# Per-cell entities — these are dynamic per cell_count and assembled at runtime,
-# but their template is declared here for completeness.
-CELL_VOLTAGE_TEMPLATE: Final = ReadOnlyEntity(
-    object_id="cell_{N}_volt",
-    topic_suffix="Cell_{N}_volt",
-    source_field="cell_voltages_v[{i}]",  # i is 0-indexed
-    component=Component.SENSOR,
-    device_class="voltage",
-    state_class="measurement",
-    unit_of_measurement="V",
-    legacy_french_topic="Cell_{N}_volt",
-    description="Cell {N} voltage.",
-)
+# -- Cell-statistics sensors derived from JkRealtime ----------------------------------
 
-CELL_RESISTANCE_TEMPLATE: Final = ReadOnlyEntity(
-    object_id="cell_{N}_ohm",
-    topic_suffix="Cell_{N}_ohm",
-    source_field="cell_resistances_ohm[{i}]",
-    component=Component.SENSOR,
-    device_class=None,
-    state_class="measurement",
-    unit_of_measurement="Ω",
-    legacy_french_topic="Cell_{N}_ohm",
-    description="Cell {N} internal resistance.",
-)
-
-
-def expand_cell_entities(cell_count: int) -> tuple[ReadOnlyEntity, ...]:
-    """Return one voltage + one resistance entity for each cell (1-indexed)."""
-    out: list[ReadOnlyEntity] = []
-    for n in range(1, cell_count + 1):
-        i = n - 1
-        out.append(
-            ReadOnlyEntity(
-                object_id=f"cell_{n}_volt",
-                topic_suffix=f"Cell_{n}_volt",
-                source_field=f"cell_voltages_v[{i}]",
-                component=Component.SENSOR,
-                device_class="voltage",
-                state_class="measurement",
-                unit_of_measurement="V",
-                legacy_french_topic=f"Cell_{n}_volt",
-                description=f"Cell {n} voltage.",
-            )
-        )
-        out.append(
-            ReadOnlyEntity(
-                object_id=f"cell_{n}_ohm",
-                topic_suffix=f"Cell_{n}_ohm",
-                source_field=f"cell_resistances_ohm[{i}]",
-                component=Component.SENSOR,
-                device_class=None,
-                state_class="measurement",
-                unit_of_measurement="Ω",
-                legacy_french_topic=f"Cell_{n}_ohm",
-                description=f"Cell {n} internal resistance.",
-            )
-        )
-    return tuple(out)
-
-
-# Cell-statistics sensors derived from the live frame
 CELL_STATS_SENSORS: Final[tuple[ReadOnlyEntity, ...]] = (
     ReadOnlyEntity(
         object_id="cell_voltage_average",
         topic_suffix="cell_voltage_average",
-        source_field="cell_voltage_average_v",
+        source_field="cell_voltage_avg_v",
         component=Component.SENSOR,
         device_class="voltage",
         state_class="measurement",
         unit_of_measurement="V",
-        legacy_french_topic="cell_voltage_average",
-        description="Average cell voltage (over populated cells only).",
+        description="Average cell voltage (populated cells only).",
     ),
     ReadOnlyEntity(
         object_id="cell_voltage_delta",
@@ -432,7 +298,6 @@ CELL_STATS_SENSORS: Final[tuple[ReadOnlyEntity, ...]] = (
         device_class="voltage",
         state_class="measurement",
         unit_of_measurement="V",
-        legacy_french_topic="cell_voltage_delta",
         description="Cell voltage delta (max − min).",
     ),
     ReadOnlyEntity(
@@ -443,7 +308,6 @@ CELL_STATS_SENSORS: Final[tuple[ReadOnlyEntity, ...]] = (
         device_class="voltage",
         state_class="measurement",
         unit_of_measurement="V",
-        legacy_french_topic="cell_voltage_max_value",
         description="Highest cell voltage.",
     ),
     ReadOnlyEntity(
@@ -454,7 +318,6 @@ CELL_STATS_SENSORS: Final[tuple[ReadOnlyEntity, ...]] = (
         device_class="voltage",
         state_class="measurement",
         unit_of_measurement="V",
-        legacy_french_topic="cell_voltage_min_value",
         description="Lowest cell voltage.",
     ),
     ReadOnlyEntity(
@@ -465,8 +328,7 @@ CELL_STATS_SENSORS: Final[tuple[ReadOnlyEntity, ...]] = (
         device_class=None,
         state_class="measurement",
         unit_of_measurement=None,
-        legacy_french_topic="cell_voltage_max_number",
-        description="Index (1-based) of the highest-voltage cell.",
+        description="1-indexed cell number with the highest voltage.",
     ),
     ReadOnlyEntity(
         object_id="cell_voltage_min_number",
@@ -476,68 +338,77 @@ CELL_STATS_SENSORS: Final[tuple[ReadOnlyEntity, ...]] = (
         device_class=None,
         state_class="measurement",
         unit_of_measurement=None,
-        legacy_french_topic="cell_voltage_min_number",
-        description="Index (1-based) of the lowest-voltage cell.",
+        description="1-indexed cell number with the lowest voltage.",
+    ),
+    ReadOnlyEntity(
+        # Renamed from `cell_count` to avoid clashing with the writable
+        # `cell_count` setting (which is the user-configured cell count).
+        object_id="present_cell_count",
+        topic_suffix="present_cell_count",
+        source_field="cell_count",
+        component=Component.SENSOR,
+        device_class=None,
+        state_class="measurement",
+        unit_of_measurement=None,
+        description="Number of cells the BMS reports as present.",
     ),
 )
 
 
-# Static / fixed-info sensors (Trame 1)
+# -- Per-cell entities (1-indexed) ----------------------------------------------------
+
+
+def expand_cell_entities(cell_count: int) -> tuple[ReadOnlyEntity, ...]:
+    """Return one voltage entity per populated cell."""
+    out: list[ReadOnlyEntity] = []
+    for n in range(1, cell_count + 1):
+        out.append(
+            ReadOnlyEntity(
+                object_id=f"cell_{n}_volt",
+                topic_suffix=f"Cell_{n}_volt",
+                source_field=f"cell_voltages_v[{n - 1}]",
+                component=Component.SENSOR,
+                device_class="voltage",
+                state_class="measurement",
+                unit_of_measurement="V",
+                description=f"Cell {n} voltage.",
+            )
+        )
+    return tuple(out)
+
+
+# -- Static-info sensors from JkStaticInfo --------------------------------------------
+
 FIXED_SENSORS: Final[tuple[ReadOnlyEntity, ...]] = (
     ReadOnlyEntity(
         object_id="bms_model",
         topic_suffix="bms",
-        source_field="bms_model",
+        source_field="model",
         component=Component.SENSOR,
         device_class=None,
         state_class=None,
         unit_of_measurement=None,
-        legacy_french_topic="bms",
         description="BMS model identifier.",
     ),
     ReadOnlyEntity(
-        object_id="firmware_version",
+        object_id="hw_version",
         topic_suffix="fw",
-        source_field="firmware_version",
+        source_field="hw_version",
         component=Component.SENSOR,
         device_class=None,
         state_class=None,
         unit_of_measurement=None,
-        legacy_french_topic="fw",
-        description="BMS firmware version.",
+        description="BMS hardware version.",
     ),
     ReadOnlyEntity(
-        object_id="software_version",
+        object_id="sw_version",
         topic_suffix="sw",
-        source_field="software_version",
+        source_field="sw_version",
         component=Component.SENSOR,
         device_class=None,
         state_class=None,
         unit_of_measurement=None,
-        legacy_french_topic="sw",
-        description="BMS software version.",
-    ),
-    ReadOnlyEntity(
-        object_id="uptime",
-        topic_suffix="uptime",
-        source_field="uptime_s",
-        component=Component.SENSOR,
-        device_class="duration",
-        state_class="total_increasing",
-        unit_of_measurement="s",
-        legacy_french_topic="uptime",
-        description="BMS uptime since power-on.",
-    ),
-    ReadOnlyEntity(
-        object_id="power_on_count",
-        topic_suffix="power_count",
-        source_field="power_on_count",
-        component=Component.SENSOR,
-        device_class=None,
-        state_class="total_increasing",
-        unit_of_measurement=None,
-        legacy_french_topic="power_count",
-        description="Number of times the BMS has been powered on.",
+        description="BMS software / firmware version.",
     ),
     ReadOnlyEntity(
         object_id="serial_number",
@@ -547,122 +418,16 @@ FIXED_SENSORS: Final[tuple[ReadOnlyEntity, ...]] = (
         device_class=None,
         state_class=None,
         unit_of_measurement=None,
-        legacy_french_topic="serialnb",
         description="BMS serial number.",
-    ),
-    ReadOnlyEntity(
-        object_id="brand",
-        topic_suffix="brand",
-        source_field="brand",
-        component=Component.SENSOR,
-        device_class=None,
-        state_class=None,
-        unit_of_measurement=None,
-        legacy_french_topic="brand",
-        description="BMS brand.",
-    ),
-    ReadOnlyEntity(
-        object_id="manufacturing_date",
-        topic_suffix="manufacturing_date",
-        source_field="manufacturing_date",
-        component=Component.SENSOR,
-        device_class=None,
-        state_class=None,
-        unit_of_measurement=None,
-        legacy_french_topic="Date_Fabrication",
-        description="Manufacturing date (YYMMDD).",
-    ),
-    ReadOnlyEntity(
-        object_id="uart1_protocol_number",
-        topic_suffix="uart1_protocol_number",
-        source_field="uart1_protocol_number",
-        component=Component.SENSOR,
-        device_class=None,
-        state_class=None,
-        unit_of_measurement=None,
-        legacy_french_topic="uart1_protocol_number",
-        description="UART1 protocol number.",
-    ),
-    ReadOnlyEntity(
-        object_id="can_protocol_number",
-        topic_suffix="can_protocol_number",
-        source_field="can_protocol_number",
-        component=Component.SENSOR,
-        device_class=None,
-        state_class=None,
-        unit_of_measurement=None,
-        legacy_french_topic="can_protocol_number",
-        description="CAN protocol number.",
-    ),
-    ReadOnlyEntity(
-        object_id="lcd_buzzer_trigger",
-        topic_suffix="lcd_buzzer_trigger",
-        source_field="lcd_buzzer_trigger",
-        component=Component.SENSOR,
-        device_class=None,
-        state_class=None,
-        unit_of_measurement=None,
-        legacy_french_topic="lcd_buzzer_trigger",
-        description="LCD buzzer trigger source.",
-    ),
-    ReadOnlyEntity(
-        object_id="lcd_buzzer_trigger_value",
-        topic_suffix="lcd_buzzer_trigger_value",
-        source_field="lcd_buzzer_trigger_value",
-        component=Component.SENSOR,
-        device_class=None,
-        state_class=None,
-        unit_of_measurement="%",
-        legacy_french_topic="lcd_buzzer_trigger_value",
-        description="LCD buzzer ON threshold.",
-    ),
-    ReadOnlyEntity(
-        object_id="lcd_buzzer_release_value",
-        topic_suffix="lcd_buzzer_release_value",
-        source_field="lcd_buzzer_release_value",
-        component=Component.SENSOR,
-        device_class=None,
-        state_class=None,
-        unit_of_measurement="%",
-        legacy_french_topic="lcd_buzzer_release_value",
-        description="LCD buzzer OFF threshold.",
-    ),
-    ReadOnlyEntity(
-        object_id="request_charge_voltage_time",
-        topic_suffix="request_charge_voltage_time",
-        source_field="request_charge_voltage_time_h",
-        component=Component.SENSOR,
-        device_class="duration",
-        state_class=None,
-        unit_of_measurement="h",
-        legacy_french_topic="Temps_RCV",
-        description="Charge-stage duration request.",
-    ),
-    ReadOnlyEntity(
-        object_id="request_float_voltage_time",
-        topic_suffix="request_float_voltage_time",
-        source_field="request_float_voltage_time_h",
-        component=Component.SENSOR,
-        device_class="duration",
-        state_class=None,
-        unit_of_measurement="h",
-        legacy_french_topic="Temps_RFV",
-        description="Float-stage duration request.",
     ),
 )
 
 
-# ---------------------------------------------------------------------------------------------
-# Writable entities — derived from the register table
-# ---------------------------------------------------------------------------------------------
+# -- Writable entities -----------------------------------------------------------------
 
 
 def _writable_from_register(reg: RegisterDef) -> WritableEntity:
-    component = (
-        Component.SWITCH
-        if reg.encoding.value == "bool32"
-        else Component.NUMBER
-    )
+    component = Component.SWITCH if reg.encoding is Encoding.BOOL32 else Component.NUMBER
     return WritableEntity(
         object_id=reg.name,
         topic_suffix=f"control/{reg.name}",
@@ -690,7 +455,7 @@ PACKED_BIT_ENTITIES: Final[tuple[PackedBitEntity, ...]] = tuple(
 
 
 def all_read_only_entities(cell_count: int) -> tuple[ReadOnlyEntity, ...]:
-    """Return every read-only entity for the given pack `cell_count`."""
+    """Return every read-only entity, expanded for the given cell_count."""
     return (
         LIVE_SENSORS
         + LIVE_BINARY_SENSORS
@@ -700,8 +465,8 @@ def all_read_only_entities(cell_count: int) -> tuple[ReadOnlyEntity, ...]:
     )
 
 
-# Convenient lookup table: topic suffix → entity, used by the MQTT write router.
 def writable_by_command_topic_suffix() -> dict[str, WritableEntity | PackedBitEntity]:
+    """Lookup table: ``control/<name>/set`` → entity, for the MQTT write router."""
     out: dict[str, WritableEntity | PackedBitEntity] = {}
     for w in WRITABLE_ENTITIES:
         out[f"{w.topic_suffix}/set"] = w
