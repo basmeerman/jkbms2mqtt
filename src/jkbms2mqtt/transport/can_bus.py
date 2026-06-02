@@ -13,10 +13,23 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass, field
+from typing import Any, Protocol
 
 from jkbms2mqtt.transport.backoff import connect_with_backoff as _connect_with_backoff
 
 logger = logging.getLogger(__name__)
+
+
+class _CanBus(Protocol):
+    """Subset of `can.BusABC` we use — recv() + shutdown()."""
+
+    def recv(self, timeout: float | None = ...) -> Any: ...  # pragma: no cover - Protocol body
+
+    def shutdown(self) -> None: ...  # pragma: no cover - Protocol body
+
+
+# A bus factory accepts python-can's standard kwargs and returns a Bus.
+CanBusFactory = Any  # python-can's typing is loose; treat as Any
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,13 +47,18 @@ class CanBusTransport:
 
     `channel` is typically `can0`. `interface` is `socketcan` on Linux/HA.
     Recv timeout is per-call.
+
+    Note: this transport has a different API surface from `Transport` (CAN is
+    message-oriented, not byte-oriented), so it intentionally does not implement
+    `Transport.read_exactly` / `write`. The orchestrator branches on transport
+    type before dispatching.
     """
 
     channel: str = "can0"
     interface: str = "socketcan"
 
-    _bus: object = field(default=None, init=False, repr=False)
-    _factory: object = field(default=None, init=False, repr=False)
+    _bus: _CanBus | None = field(default=None, init=False, repr=False)
+    _factory: CanBusFactory | None = field(default=None, init=False, repr=False)
 
     @property
     def is_connected(self) -> bool:
@@ -76,8 +94,9 @@ class CanBusTransport:
         """
         if self._bus is None:
             raise ConnectionError("CAN bus not connected")
+        bus = self._bus  # capture for the lambda — narrows out the None branch
         loop = asyncio.get_running_loop()
-        msg = await loop.run_in_executor(None, lambda: self._bus.recv(timeout=timeout_s))
+        msg = await loop.run_in_executor(None, lambda: bus.recv(timeout=timeout_s))
         if msg is None:
             return None
         return CanMessage(
@@ -87,7 +106,7 @@ class CanBusTransport:
         )
 
 
-def _default_factory() -> object:
+def _default_factory() -> CanBusFactory:
     """Lazy-import `can.Bus`. Skipped if `python-can` isn't installed."""
     try:
         import can

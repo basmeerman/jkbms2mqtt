@@ -56,6 +56,7 @@ from jkbms2mqtt.protocol.registers import (
 )
 from jkbms2mqtt.recorder import RecordingTransport
 from jkbms2mqtt.transport.base import Transport
+from jkbms2mqtt.transport.can_bus import CanBusTransport
 from jkbms2mqtt.transport.tcp_gateway import TcpGatewayTransport, connect_with_backoff
 from jkbms2mqtt.write_executor import WriteExecutor, WriteRequest
 
@@ -71,30 +72,31 @@ def configure_logging(level: str) -> None:
     )
 
 
-def build_transport(settings: Settings) -> Transport:
+def build_transport(settings: Settings) -> Transport | CanBusTransport:
     """Construct the configured transport.
 
-    Supported in v1.x:
-    - `tcp_gateway` → `TcpGatewayTransport`
-    - `usb_serial` → `UsbSerialTransport` (requires `pyserial-asyncio-fast`)
+    Supported transports:
+    - `tcp_gateway` / `usb_serial` → `Transport`-shaped (byte-stream API).
+    - `can_bus` → `CanBusTransport` (message-oriented; not a `Transport`).
+
+    Either kind may be wrapped in `RecordingTransport` for replay logging.
+    Only the byte-stream `Transport` kind is wrapped; `CanBusTransport` is
+    handed directly to the CAN runner since it has its own message API.
     """
     from jkbms2mqtt.protocol.capabilities import Transport as TransportEnum
     from jkbms2mqtt.transport.usb_serial import UsbSerialTransport
 
-    transport: Transport
     if settings.transport is TransportEnum.TCP_GATEWAY:
         assert settings.gateway_host and settings.gateway_port  # validator invariant
-        transport = TcpGatewayTransport(
+        byte_transport: Transport = TcpGatewayTransport(
             host=settings.gateway_host,
             port=settings.gateway_port,
         )
     elif settings.transport is TransportEnum.USB_SERIAL:
         assert settings.jkbms_path  # validator invariant
-        transport = UsbSerialTransport(device_path=settings.jkbms_path)
+        byte_transport = UsbSerialTransport(device_path=settings.jkbms_path)
     elif settings.transport is TransportEnum.CAN_BUS:
-        from jkbms2mqtt.transport.can_bus import CanBusTransport
-
-        transport = CanBusTransport(channel=settings.jkbms_path or "can0")
+        return CanBusTransport(channel=settings.jkbms_path or "can0")
     else:  # pragma: no cover - all enum members covered above
         raise NotImplementedError(
             f"transport={settings.transport.value} not yet implemented"
@@ -102,9 +104,8 @@ def build_transport(settings: Settings) -> Transport:
 
     if settings.recording.enabled:
         path = Path(settings.recording.path) / "session.jsonl"
-        transport = RecordingTransport(inner=transport, path=path)
-
-    return transport
+        return RecordingTransport(inner=byte_transport, path=path)
+    return byte_transport
 
 
 class BmsRunner:
@@ -285,13 +286,15 @@ async def run(settings: Settings) -> None:  # pragma: no cover - top-level glue
     await transport.aclose()
 
 
-async def _connect_transport(transport: Transport) -> None:  # pragma: no cover - top-level glue
+async def _connect_transport(  # pragma: no cover - top-level glue
+    transport: Transport | CanBusTransport,
+) -> None:
     """Open the transport, applying transport-specific backoff."""
-    from jkbms2mqtt.transport.can_bus import CanBusTransport
     from jkbms2mqtt.transport.can_bus import connect_with_backoff as can_connect
     from jkbms2mqtt.transport.usb_serial import UsbSerialTransport
     from jkbms2mqtt.transport.usb_serial import connect_with_backoff as serial_connect
 
+    inner: Transport | CanBusTransport
     if isinstance(transport, RecordingTransport):
         inner = transport.inner
     else:
@@ -308,14 +311,13 @@ async def _connect_transport(transport: Transport) -> None:  # pragma: no cover 
 
 async def _spawn_runners(  # pragma: no cover - top-level glue
     settings: Settings,
-    transport: Transport,
+    transport: Transport | CanBusTransport,
     arbiter: BusArbiter,
     mqtt: MqttClient,
 ) -> list[asyncio.Task[None]]:
     """Spawn the right set of background tasks for the current topology."""
     from jkbms2mqtt.can_runner import CanRunner
     from jkbms2mqtt.listen_runner import ListenRunner
-    from jkbms2mqtt.transport.can_bus import CanBusTransport
 
     tasks: list[asyncio.Task[None]] = []
 
@@ -325,6 +327,9 @@ async def _spawn_runners(  # pragma: no cover - top-level glue
         runner = CanRunner(settings=settings, transport=inner, mqtt=mqtt)
         tasks.append(asyncio.create_task(runner.run()))
         return tasks
+
+    # Non-CAN topologies use the byte-stream Transport API.
+    assert not isinstance(transport, CanBusTransport)
 
     if settings.topology is Topology.BROADCAST:
         listen = ListenRunner(settings=settings, transport=transport, mqtt=mqtt)

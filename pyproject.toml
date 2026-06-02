@@ -30,6 +30,7 @@ dev = [
     "mypy>=1.10",
     "pyserial-asyncio-fast>=0.16",
     "python-can>=4.4",
+    "types-PyYAML>=6.0",
 ]
 
 [project.scripts]

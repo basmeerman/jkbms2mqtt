@@ -703,8 +703,8 @@ def all_read_only_entities(cell_count: int) -> tuple[ReadOnlyEntity, ...]:
 # Convenient lookup table: topic suffix → entity, used by the MQTT write router.
 def writable_by_command_topic_suffix() -> dict[str, WritableEntity | PackedBitEntity]:
     out: dict[str, WritableEntity | PackedBitEntity] = {}
-    for e in WRITABLE_ENTITIES:
-        out[f"{e.topic_suffix}/set"] = e
-    for e in PACKED_BIT_ENTITIES:
-        out[f"{e.topic_suffix}/set"] = e
+    for w in WRITABLE_ENTITIES:
+        out[f"{w.topic_suffix}/set"] = w
+    for p in PACKED_BIT_ENTITIES:
+        out[f"{p.topic_suffix}/set"] = p
     return out

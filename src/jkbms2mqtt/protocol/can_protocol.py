@@ -130,7 +130,8 @@ ALARM_NAMES: Final = (
 
 
 def _u16le(data: bytes, off: int) -> int:
-    return struct.unpack_from("<H", data, off)[0]
+    value: int = struct.unpack_from("<H", data, off)[0]
+    return value
 
 
 def _u8(data: bytes, off: int) -> int:
@@ -255,7 +256,12 @@ def decode_cell_voltages(can_id: int, data: bytes) -> CellVoltages:
     if len(data) != 8:
         raise ValueError(f"expected 8 bytes, got {len(data)}")
     group = (can_id >> 16) & 0x0F  # bits 19..16 carry 0..3
-    voltages = tuple(_u16le(data, 2 * i) * 0.001 for i in range(4))
+    voltages: tuple[float, float, float, float] = (
+        _u16le(data, 0) * 0.001,
+        _u16le(data, 2) * 0.001,
+        _u16le(data, 4) * 0.001,
+        _u16le(data, 6) * 0.001,
+    )
     return CellVoltages(group_index=group, voltages_v=voltages)
 
 

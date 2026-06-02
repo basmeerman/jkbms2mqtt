@@ -151,19 +151,23 @@ def _u8(buf: bytes, off: int) -> int:
 
 
 def _u16le(buf: bytes, off: int) -> int:
-    return struct.unpack_from("<H", buf, off)[0]
+    value: int = struct.unpack_from("<H", buf, off)[0]
+    return value
 
 
 def _i16le(buf: bytes, off: int) -> int:
-    return struct.unpack_from("<h", buf, off)[0]
+    value: int = struct.unpack_from("<h", buf, off)[0]
+    return value
 
 
 def _u32le(buf: bytes, off: int) -> int:
-    return struct.unpack_from("<I", buf, off)[0]
+    value: int = struct.unpack_from("<I", buf, off)[0]
+    return value
 
 
 def _i32le(buf: bytes, off: int) -> int:
-    return struct.unpack_from("<i", buf, off)[0]
+    value: int = struct.unpack_from("<i", buf, off)[0]
+    return value
 
 
 def _ascii(buf: bytes, off: int, length: int) -> str:

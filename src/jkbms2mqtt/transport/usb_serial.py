@@ -13,17 +13,18 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
 
 from jkbms2mqtt.transport.backoff import connect_with_backoff as _connect_with_backoff
-
-if TYPE_CHECKING:  # pragma: no cover
-    pass
 
 logger = logging.getLogger(__name__)
 
 BAUD_RATE = 115200  # JK-BMS fixed baud — not user-configurable
+
+# A serial-opener takes keyword args and returns a (reader, writer) pair.
+# Both `serial_asyncio_fast.open_serial_connection` and our test fakes match.
+SerialOpener = Callable[..., Awaitable[tuple[asyncio.StreamReader, asyncio.StreamWriter]]]
 
 
 @dataclass
@@ -37,7 +38,7 @@ class UsbSerialTransport:
     _writer: asyncio.StreamWriter | None = field(default=None, init=False, repr=False)
     _lock: asyncio.Lock | None = field(default=None, init=False, repr=False)
     # Test seam: lets tests inject a fake open_serial_connection.
-    _opener: object = field(default=None, init=False, repr=False)
+    _opener: SerialOpener | None = field(default=None, init=False, repr=False)
 
     def _lock_for(self) -> asyncio.Lock:
         if self._lock is None:
@@ -85,7 +86,7 @@ class UsbSerialTransport:
         await self._writer.drain()
 
 
-def _default_opener() -> object:
+def _default_opener() -> SerialOpener:
     """Return `serial_asyncio_fast.open_serial_connection` lazily.
 
     `pyserial-asyncio-fast` is an optional dependency; importing it at module
