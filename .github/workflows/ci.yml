@@ -59,7 +59,7 @@ jobs:
       - uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: linux/amd64
+          platforms: linux/amd64,linux/arm64
           push: false
 
   docker:
@@ -91,7 +91,8 @@ jobs:
       - uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: linux/amd64,linux/arm64,linux/arm/v7
+          # HA supervisor supports aarch64 and amd64; armv7 is deprecated.
+          platforms: linux/amd64,linux/arm64
           push: true
           # HA composes <image>:<addon-version> at install time, so we MUST
           # publish the version tag in addition to latest/sha.
