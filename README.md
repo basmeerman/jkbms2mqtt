@@ -25,7 +25,7 @@ in `jkbms2mqtt/` — no pre-built images are published.
     ├── run.sh            # container entrypoint
     ├── pyproject.toml    # Python package
     ├── src/jkbms2mqtt/   # source
-    ├── tests/            # 489 tests, 100% branch coverage
+    ├── tests/            # 347 tests, 100% branch coverage
     ├── scripts/          # CI helper scripts
     ├── README.md         # full project documentation
     └── DOCS.md           # add-on docs shown in HA UI
