@@ -1,0 +1,8 @@
+---
+# Per-arch base images used when this add-on is built by the Home Assistant
+# supervisor. Standalone / CI builds use the Dockerfile's BUILD_FROM default
+# (python:3.12-alpine).
+build_from:
+  aarch64: ghcr.io/home-assistant/aarch64-base:latest
+  amd64: ghcr.io/home-assistant/amd64-base:latest
+  armv7: ghcr.io/home-assistant/armv7-base:latest
