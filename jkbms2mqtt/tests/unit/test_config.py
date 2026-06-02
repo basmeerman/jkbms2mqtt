@@ -64,6 +64,30 @@ class TestBmsIds:
         s = Settings(bms_ids=[2, 5, 7])
         assert s.bms_ids == [2, 5, 7]
 
+    def test_string_parsed_as_comma_separated(self) -> None:
+        s = Settings(bms_ids="1,2,3,4,5,6")  # type: ignore[arg-type]
+        assert s.bms_ids == [1, 2, 3, 4, 5, 6]
+
+    def test_string_with_whitespace_parsed(self) -> None:
+        s = Settings(bms_ids=" 2 , 5 , 7 ")  # type: ignore[arg-type]
+        assert s.bms_ids == [2, 5, 7]
+
+    def test_string_single_value_parsed(self) -> None:
+        s = Settings(bms_ids="3")  # type: ignore[arg-type]
+        assert s.bms_ids == [3]
+
+    def test_empty_string_rejected(self) -> None:
+        with pytest.raises(ValueError, match="at least one"):
+            Settings(bms_ids="")  # type: ignore[arg-type]
+
+    def test_string_with_invalid_int_rejected(self) -> None:
+        with pytest.raises(ValueError):
+            Settings(bms_ids="1,abc,3")  # type: ignore[arg-type]
+
+    def test_string_out_of_range_rejected(self) -> None:
+        with pytest.raises(ValueError):
+            Settings(bms_ids="1,2,99")  # type: ignore[arg-type]
+
 
 class TestNumericRanges:
     def test_poll_interval_lower_bound(self) -> None:

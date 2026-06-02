@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Annotated, Self
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 HA_OPTIONS_PATH = Path("/data/options.json")
 
@@ -70,6 +70,21 @@ class Settings(BaseModel):
 
     log_level: LogLevel = LogLevel.INFO
     recording_enabled: bool = False
+
+    @field_validator("bms_ids", mode="before")
+    @classmethod
+    def _parse_bms_ids(cls, v: object) -> object:
+        """Accept either a list of ints or a comma-separated string.
+
+        Home Assistant's add-on UI renders a regex-validated ``str`` field
+        as a single text input — easier and more reliable across HA versions
+        than the list editor. The Python side accepts both forms so YAML
+        configs, JSON options, and the ``JKBMS2MQTT_BMS_IDS`` env var all
+        work uniformly.
+        """
+        if isinstance(v, str):
+            return [int(s.strip()) for s in v.split(",") if s.strip()]
+        return v
 
     @model_validator(mode="after")
     def _validate(self) -> Self:
@@ -134,8 +149,9 @@ _ENV_SKIP = frozenset({"CONFIG_YAML"})
 def _collect_env(env: dict[str, str]) -> dict[str, object]:
     """Translate ``JKBMS2MQTT_FOO_BAR`` env vars into ``{foo_bar: ...}``.
 
-    ``bms_ids`` is treated specially because it's a list: the env value is a
-    comma-separated list of integers (e.g. ``"1,2,3,4,5,6"``).
+    ``bms_ids`` is left as a string here — the Settings field validator
+    handles the comma-split parsing uniformly for env, YAML, and HA-options
+    inputs.
     """
     out: dict[str, object] = {}
     for key, value in env.items():
@@ -146,7 +162,7 @@ def _collect_env(env: dict[str, str]) -> dict[str, object]:
             continue
         field = suffix.lower()
         if field == "bms_ids":
-            out[field] = [int(s.strip()) for s in value.split(",") if s.strip()]
+            out[field] = value  # parsed by Settings._parse_bms_ids
         else:
             out[field] = _coerce_env_value(value)
     return out

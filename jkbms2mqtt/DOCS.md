@@ -45,7 +45,7 @@ Two supported transports between the bus and this add-on:
 | `gateway_host` | `192.168.1.100` | IP / hostname of the TCP-RS485 gateway. |
 | `gateway_port` | `502` | TCP port of the gateway. |
 | `jkbms_path` | `/dev/ttyUSB0` | Serial device path when `transport: usb_serial`. |
-| `bms_ids` | `[1]` | List of Modbus slave addresses (DIP-switch IDs) on the bus. E.g. `[1, 2, 3, 4, 5, 6]` for a 6-pack array; non-contiguous like `[2, 5, 7]` is fine. |
+| `bms_ids` | `1` | Comma-separated list of Modbus slave addresses (DIP-switch IDs) on the bus. E.g. `1,2,3,4,5,6` for a 6-pack array; non-contiguous like `2,5,7` is fine. Whitespace around commas is OK. |
 | `topology` | `master_poll` | Dropdown. (Currently the only mode for this protocol.) |
 | `poll_interval_s` | `5.0` | Seconds between poll cycles. |
 | `mqtt_host` | `core-mosquitto.local.hass.io` | The HA Mosquitto broker. |

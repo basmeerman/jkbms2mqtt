@@ -29,8 +29,7 @@ options:
   gateway_host: 192.168.1.100
   gateway_port: 502
   jkbms_path: /dev/ttyUSB0
-  bms_ids:
-    - 1
+  bms_ids: "1"
   topology: master_poll
   poll_interval_s: 5.0
   mqtt_host: core-mosquitto.local.hass.io
@@ -49,8 +48,9 @@ schema:
   gateway_host: str
   gateway_port: port
   jkbms_path: str
-  bms_ids:
-    - int(1,15)
+  # Comma-separated list of slave IDs in 1..15. The regex permits whitespace
+  # around commas so "1, 2, 3" works.
+  bms_ids: match(^\s*\d+(\s*,\s*\d+)*\s*$)
   topology: list(master_poll)
   poll_interval_s: float(1,60)
   mqtt_host: str
