@@ -4,9 +4,8 @@ version: "1.0.0"
 slug: jkbms2mqtt
 description: Lightweight JK-BMS to MQTT bridge with Home Assistant Discovery
 url: https://github.com/basmeerman/jkbms2mqtt
-# Tell the Home Assistant supervisor to pull the pre-built image published by
-# this repo's CI. The supervisor composes `<image>:<version>` automatically.
-image: ghcr.io/basmeerman/jkbms2mqtt
+# No `image:` field — Home Assistant supervisor builds the add-on locally from
+# the Dockerfile in this directory. Per-arch base images come from build.yaml.
 arch:
   - aarch64
   - amd64
