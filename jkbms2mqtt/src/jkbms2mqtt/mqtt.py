@@ -96,6 +96,11 @@ def discovery_for_read_only(
         payload["state_class"] = entity.state_class
     if entity.unit_of_measurement:
         payload["unit_of_measurement"] = entity.unit_of_measurement
+    if entity.decimals is not None:
+        # Tell HA's frontend how many decimal places to render. Without this,
+        # HA picks a device-class-specific default (often 1 for voltage), which
+        # truncates millivolt-resolution cell readings down to ``3 V``.
+        payload["suggested_display_precision"] = entity.decimals
     if entity.component is Component.BINARY_SENSOR:
         payload["payload_on"] = "ON"
         payload["payload_off"] = "OFF"
@@ -209,16 +214,16 @@ def state_messages_from_live(live: JkRealtime, bms_name: str) -> list[tuple[str,
 
     for e in LIVE_SENSORS:
         value = getattr(live, e.source_field)
-        out.append((_state_topic(bms_name, e.topic_suffix), _format(value)))
+        out.append((_state_topic(bms_name, e.topic_suffix), _format(value, e.decimals)))
     for e in LIVE_BINARY_SENSORS:
         value = getattr(live, e.source_field)
         out.append((_state_topic(bms_name, e.topic_suffix), "ON" if value else "OFF"))
     for e in CELL_STATS_SENSORS:
         value = getattr(live, e.source_field)
-        out.append((_state_topic(bms_name, e.topic_suffix), _format(value)))
-    # Per-cell entities
+        out.append((_state_topic(bms_name, e.topic_suffix), _format(value, e.decimals)))
+    # Per-cell entities — mV-resolution voltages.
     for i, v in enumerate(live.cell_voltages_v):
-        out.append((f"{bms_name}/Cell_{i + 1}_volt", _format(v)))
+        out.append((f"{bms_name}/Cell_{i + 1}_volt", _format(v, 3)))
     return out
 
 
@@ -227,19 +232,33 @@ def state_messages_from_static(info: JkStaticInfo, bms_name: str) -> list[tuple[
     out: list[tuple[str, str]] = []
     for e in FIXED_SENSORS:
         value = getattr(info, e.source_field)
-        out.append((_state_topic(bms_name, e.topic_suffix), _format(value)))
+        out.append((_state_topic(bms_name, e.topic_suffix), _format(value, e.decimals)))
     return out
 
 
 # -- Helpers --------------------------------------------------------------------------
 
 
-def _format(value: object) -> str:
-    """Format a value for an MQTT state topic."""
+def _format(value: object, decimals: int | None = None) -> str:
+    """Format a value for an MQTT state topic.
+
+    ``decimals`` controls how many decimal places a numeric value gets:
+
+    - ``None`` defaults to 3 for floats (preserves the old behaviour for
+      values without an explicit precision).
+    - ``0`` renders floats as integer strings (``"3"``, not ``"3.000"``).
+    - Any other value renders with that many decimal places.
+
+    Booleans and strings are unaffected.
+    """
     if isinstance(value, bool):
         return "ON" if value else "OFF"
     if isinstance(value, float):
-        return f"{value:.3f}"
+        if decimals is None:
+            decimals = 3
+        if decimals == 0:
+            return str(int(round(value)))
+        return f"{value:.{decimals}f}"
     if isinstance(value, int):
         return str(value)
     return str(value)

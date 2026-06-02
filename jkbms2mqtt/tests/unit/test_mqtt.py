@@ -129,6 +129,24 @@ class TestDiscoveryPayloads:
         assert p["device"]["identifiers"] == ["BMS_1_device"]
         assert p["device"]["name"] == "BMS_1"
         assert p["unique_id"] == "BMS_1_device_mos_temp"
+        assert p["suggested_display_precision"] == 1  # temps are 0.1 °C from BMS
+
+    def test_voltage_sensor_full_mv_precision(self) -> None:
+        e = next(x for x in LIVE_SENSORS if x.object_id == "total_voltage")
+        msg = discovery_for_read_only(e, "BMS_1", discovery_prefix="homeassistant")
+        assert msg.payload["suggested_display_precision"] == 3
+
+    def test_percent_sensor_zero_decimals(self) -> None:
+        e = next(x for x in LIVE_SENSORS if x.object_id == "soc_percentage")
+        msg = discovery_for_read_only(e, "BMS_1", discovery_prefix="homeassistant")
+        assert msg.payload["suggested_display_precision"] == 0
+
+    def test_binary_sensor_omits_suggested_display_precision(self) -> None:
+        from jkbms2mqtt.entities import LIVE_BINARY_SENSORS
+
+        e = LIVE_BINARY_SENSORS[0]
+        msg = discovery_for_read_only(e, "BMS_1", discovery_prefix="homeassistant")
+        assert "suggested_display_precision" not in msg.payload
 
     def test_writable_number(self) -> None:
         w = next(x for x in WRITABLE_ENTITIES if x.object_id == "max_charge_current")
@@ -182,6 +200,25 @@ class TestStateMessagesFromLive:
         msgs = dict(state_messages_from_live(_sample_realtime(), "BMS_1"))
         assert msgs["BMS_1/Total_Voltage_V"] == "53.000"
 
+    def test_temperatures_have_one_decimal(self) -> None:
+        msgs = dict(state_messages_from_live(_sample_realtime(), "BMS_1"))
+        # mos_temp_c=25.0 → "25.0"  (NOT "25.000" — that's 2 fake zeros)
+        assert msgs["BMS_1/Mos_temp"] == "25.0"
+
+    def test_percentages_render_as_integer_strings(self) -> None:
+        msgs = dict(state_messages_from_live(_sample_realtime(), "BMS_1"))
+        # SoC is u8 from the BMS — no decimals are meaningful.
+        assert msgs["BMS_1/SOC_percentage"] == "75"
+
+    def test_cell_voltages_have_three_decimals(self) -> None:
+        msgs = dict(state_messages_from_live(_sample_realtime(cell_count=8), "BMS_1"))
+        # Cell 1 = 3.300 V from the fixture
+        assert msgs["BMS_1/Cell_1_volt"] == "3.300"
+
+    def test_current_three_decimals(self) -> None:
+        msgs = dict(state_messages_from_live(_sample_realtime(), "BMS_1"))
+        assert msgs["BMS_1/Total_Current_A"] == "10.000"
+
     def test_per_cell_count_matches_cells(self) -> None:
         msgs = state_messages_from_live(_sample_realtime(cell_count=8), "BMS_1")
         cell_topics = {t for t, _ in msgs if t.startswith("BMS_1/Cell_")}
@@ -203,10 +240,23 @@ class TestFormat:
         [
             (True, "ON"),
             (False, "OFF"),
-            (3.14159, "3.142"),
+            (3.14159, "3.142"),       # default 3 decimals when not specified
             (42, "42"),
             ("hello", "hello"),
         ],
     )
-    def test_examples(self, value: object, expected: str) -> None:
+    def test_default_examples(self, value: object, expected: str) -> None:
         assert _format(value) == expected
+
+    @pytest.mark.parametrize(
+        ("value", "decimals", "expected"),
+        [
+            (3.301, 3, "3.301"),
+            (24.7, 1, "24.7"),
+            (3.7, 0, "4"),            # rounds; integer-formatted (no decimal point)
+            (3.4, 0, "3"),
+            (3.300, None, "3.300"),   # None preserves the old 3-decimal default
+        ],
+    )
+    def test_with_decimals(self, value: float, decimals: int | None, expected: str) -> None:
+        assert _format(value, decimals) == expected
