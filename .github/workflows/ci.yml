@@ -40,7 +40,10 @@ jobs:
       - run: pip install -e ".[dev]"
       - name: Run tests with 100% branch coverage gate
         run: |
-          pytest --cov=jkbms2mqtt --cov-branch --cov-report=term --cov-fail-under=100
+          # Bare --cov picks up `[tool.coverage.run] source = ["src/jkbms2mqtt"]`
+          # from pyproject.toml. Don't pass `--cov=jkbms2mqtt` — at the repo root
+          # that name resolves to the HA add-on directory, not the Python package.
+          pytest --cov --cov-branch --cov-report=term --cov-fail-under=100
 
   docker-build:
     # On PRs: confirm the image builds (no push, no creds needed).
@@ -80,11 +83,19 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Extract add-on version
+        id: addon
+        run: |
+          version=$(grep -E '^version:' jkbms2mqtt/config.yaml | sed -E 's/version: *"?([^"]*)"?/\1/')
+          echo "version=$version" >> "$GITHUB_OUTPUT"
       - uses: docker/build-push-action@v6
         with:
           context: .
           platforms: linux/amd64,linux/arm64,linux/arm/v7
           push: true
+          # HA composes <image>:<addon-version> at install time, so we MUST
+          # publish the version tag in addition to latest/sha.
           tags: |
             ghcr.io/${{ github.repository_owner }}/jkbms2mqtt:latest
+            ghcr.io/${{ github.repository_owner }}/jkbms2mqtt:${{ steps.addon.outputs.version }}
             ghcr.io/${{ github.repository_owner }}/jkbms2mqtt:${{ github.sha }}

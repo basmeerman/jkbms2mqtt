@@ -56,15 +56,24 @@ Every layer is independently testable. The protocol layer is pure-functional
 
 ### As a Home Assistant add-on
 
-1. Add this repository to **Settings → Add-ons → Add-on Store → ⋮ → Repositories**.
-2. Install **jkbms2mqtt**.
-3. Configure under **Configuration**:
+This repository is also a Home Assistant add-on repository — it contains
+`repository.yaml` at the root and the add-on manifest in the `jkbms2mqtt/`
+subdirectory.
+
+1. In Home Assistant, open **Settings → Add-ons → Add-on Store → ⋮ → Repositories**
+   (in the newer "Apps" UI: **Settings → Apps → Repositories**).
+2. Paste `https://github.com/basmeerman/jkbms2mqtt` and click **Add**.
+3. The **jkbms2mqtt** add-on appears in the store; install it.
+4. Configure under **Configuration**:
    - `gateway_host` / `gateway_port` of your serial-over-IP device, or
      `transport: usb_serial` + `jkbms_path: /dev/ttyUSB0`.
    - `jkbms_count` if you have a multi-BMS bus.
    - Leave `enable_basic_writes` / `enable_safety_writes` off until you have
      read [`MIGRATION.md`](MIGRATION.md#write-tiers).
-4. Start. Devices auto-appear under **Settings → Devices**.
+5. Start. Devices auto-appear under **Settings → Devices**.
+
+The add-on pulls the multi-arch image `ghcr.io/basmeerman/jkbms2mqtt:<version>`
+published by this repo's CI — no local build needed.
 
 ### As a standalone container
 
@@ -91,6 +100,12 @@ python3.12 -m venv .venv
 ## Project layout
 
 ```
+repository.yaml         # Home Assistant add-on repo manifest
+jkbms2mqtt/             # the Home Assistant add-on (config.yaml + DOCS.md)
+Dockerfile              # used by CI to build the multi-arch image
+build.yaml              # per-arch base images for HA supervisor builds
+run.sh                  # container entrypoint
+
 src/jkbms2mqtt/
 ├── config.py          # pydantic Settings + load_settings()
 ├── app.py             # orchestrator wiring transport+codec+mqtt
