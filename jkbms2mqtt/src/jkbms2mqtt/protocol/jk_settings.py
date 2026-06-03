@@ -212,3 +212,50 @@ def _i32_to_words(value: int) -> list[int]:
     if value < 0:
         value += 0x1_0000_0000
     return [(value >> 16) & 0xFFFF, value & 0xFFFF]
+
+
+# -- Decoders (settings readback) -----------------------------------------------------
+
+# Cover every writable RegisterDef. Read as one contiguous Modbus 0x03 — the
+# 0x1000..0x1085 range fits inside the 125-word Modbus read limit.
+SETTINGS_BLOCK_BASE: Final = 0x1000
+SETTINGS_BLOCK_WORDS: Final = 0x86     # 0x1000..0x1085 covers every BASIC + SAFETY reg
+
+# The packed-bit register lives well above the settings block — read it separately.
+# The settings-block decoder below uses ``len(regs)`` to bounds-check, so an
+# in-block packed-bit register would still decode correctly if a firmware
+# variant relocated it.
+
+
+def decode_register_value(reg: RegisterDef, regs: list[int]) -> float | bool:
+    """Reverse ``encode_value_to_words``: read two register words back to a value.
+
+    ``regs`` is the full settings block (indexed from ``SETTINGS_BLOCK_BASE``);
+    we only read the two words at ``reg.address - SETTINGS_BLOCK_BASE``.
+    """
+    off = reg.address - SETTINGS_BLOCK_BASE
+    if off < 0 or off + 1 >= len(regs):
+        raise EncodeError(
+            f"{reg.name}: address {reg.address:#06x} outside settings block"
+        )
+    hi = regs[off] & 0xFFFF
+    lo = regs[off + 1] & 0xFFFF
+    raw32 = (hi << 16) | lo
+
+    if reg.encoding is Encoding.U32_RAW:
+        return float(raw32)
+    if reg.encoding is Encoding.U32_MILLI:
+        return raw32 / 1000.0
+    if reg.encoding is Encoding.U32_DECI:
+        return raw32 / 10.0
+    if reg.encoding is Encoding.I32_DECI:
+        signed = raw32 - 0x1_0000_0000 if raw32 >= 0x8000_0000 else raw32
+        return signed / 10.0
+    # BOOL32 — non-zero anywhere counts as on (firmware variants differ on which
+    # word carries the bit).
+    return raw32 != 0
+
+
+def decode_packed_bit_value(bit: PackedBitDef, register_value: int) -> bool:
+    """Decode a single packed bit given the current value of register 0x1114."""
+    return bool(register_value & bit.bit_mask)

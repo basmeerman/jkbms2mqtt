@@ -103,7 +103,8 @@ class WriteExecutor:
         if not self._tier_enabled(entity.register.tier):
             await self._publish_error(
                 req,
-                f"tier {entity.register.tier.value} writes disabled by config",
+                f"write rejected: enable_{entity.register.tier.value}_writes is off; "
+                f"enable it in the add-on configuration to modify this parameter",
             )
             return
 
@@ -141,7 +142,8 @@ class WriteExecutor:
         if not self._tier_enabled(entity.bit.tier):
             await self._publish_error(
                 req,
-                f"tier {entity.bit.tier.value} writes disabled by config",
+                f"write rejected: enable_{entity.bit.tier.value}_writes is off; "
+                f"enable it in the add-on configuration to modify this parameter",
             )
             return
 

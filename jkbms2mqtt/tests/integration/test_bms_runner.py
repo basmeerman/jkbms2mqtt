@@ -25,6 +25,11 @@ from jkbms2mqtt.bms_runner import (
 )
 from jkbms2mqtt.config import Settings, Transport
 from jkbms2mqtt.protocol.jk_modbus import BASE_RT, INFO_BLOCK_WORDS
+from jkbms2mqtt.protocol.jk_settings import (
+    PACKED_BIT_REGISTER,
+    SETTINGS_BLOCK_BASE,
+    SETTINGS_BLOCK_WORDS,
+)
 
 # -- Fake client + helpers --------------------------------------------------------------
 
@@ -444,6 +449,163 @@ async def test_poll_loop_runs_then_cancels() -> None:
     with pytest.raises(asyncio.CancelledError):
         await task
     assert any(t == "BMS_1/Total_Voltage_V" for t, _, _, _ in pub.log)
+
+
+# -- Settings readback -----------------------------------------------------------------
+
+
+def _settings_block_with(*, max_charge_a: float = 80.0, charge_on: bool = True) -> list[int]:
+    """Build a settings block with a couple of recognisable values set."""
+    regs = [0] * SETTINGS_BLOCK_WORDS
+    # max_charge_current is at 0x102C (encoding U32_DECI → value × 10).
+    val = int(round(max_charge_a * 10))
+    off = 0x102C - SETTINGS_BLOCK_BASE
+    regs[off] = (val >> 16) & 0xFFFF
+    regs[off + 1] = val & 0xFFFF
+    # charging_switch at 0x1070 (BOOL32).
+    off = 0x1070 - SETTINGS_BLOCK_BASE
+    regs[off + 1] = 1 if charge_on else 0
+    return regs
+
+
+async def test_settings_block_state_published() -> None:
+    client = FakeClient(
+        map={
+            (1, BASE_RT): FakeResponse(registers=_block_a_for_pack_at(voltage_v=53.0, soc=50)),
+            (1, SETTINGS_BLOCK_BASE): FakeResponse(
+                registers=_settings_block_with(max_charge_a=80.0, charge_on=True)
+            ),
+            (1, PACKED_BIT_REGISTER): FakeResponse(registers=[0x0040]),  # smart_sleep on
+        }
+    )
+    pub = PublishCapture()
+    runner = BmsRunner(
+        client=client,  # type: ignore[arg-type]
+        settings=_settings(),
+        slave_addr=1,
+        bms_name="BMS_1",
+        publish=pub,
+    )
+    await runner._poll_once()
+
+    by_topic = {t: p for t, p, _, _ in pub.log}
+    # Settings state is published whether or not the tier is enabled.
+    assert by_topic.get("BMS_1/control/max_charge_current") == "80.0"
+    assert by_topic.get("BMS_1/control/charging_switch") == "ON"
+    assert by_topic.get("BMS_1/control/smart_sleep_switch") == "ON"
+
+
+async def test_settings_block_modbus_error_skipped() -> None:
+    @dataclass
+    class _Client:
+        async def read_holding_registers(
+            self, *, address: int, count: int, device_id: int
+        ) -> Any:
+            if address == BASE_RT:
+                return FakeResponse(registers=_block_a_for_pack_at(voltage_v=53.0, soc=50))
+            if address == SETTINGS_BLOCK_BASE:
+                return FakeResponse(error=True)
+            return FakeResponse(registers=[0] * count)
+
+    pub = PublishCapture()
+    runner = BmsRunner(
+        client=_Client(),  # type: ignore[arg-type]
+        settings=_settings(),
+        slave_addr=1,
+        bms_name="BMS_1",
+        publish=pub,
+    )
+    await runner._poll_once()
+    # State (block A) still publishes; settings topic does not.
+    assert not any(
+        t == "BMS_1/control/max_charge_current" for t, _, _, _ in pub.log
+    )
+
+
+async def test_settings_block_timeout_skipped() -> None:
+    @dataclass
+    class _Client:
+        async def read_holding_registers(
+            self, *, address: int, count: int, device_id: int
+        ) -> Any:
+            if address == BASE_RT:
+                return FakeResponse(registers=_block_a_for_pack_at(voltage_v=53.0, soc=50))
+            if address == SETTINGS_BLOCK_BASE:
+                raise TimeoutError("settings slow")
+            return FakeResponse(registers=[0] * count)
+
+    runner = BmsRunner(
+        client=_Client(),  # type: ignore[arg-type]
+        settings=_settings(),
+        slave_addr=1,
+        bms_name="BMS_1",
+        publish=PublishCapture(),
+    )
+    await runner._poll_once()
+
+
+async def test_packed_bit_register_read_failure_skipped() -> None:
+    @dataclass
+    class _Client:
+        async def read_holding_registers(
+            self, *, address: int, count: int, device_id: int
+        ) -> Any:
+            if address == BASE_RT:
+                return FakeResponse(registers=_block_a_for_pack_at(voltage_v=53.0, soc=50))
+            if address == SETTINGS_BLOCK_BASE:
+                return FakeResponse(
+                    registers=_settings_block_with(max_charge_a=50.0, charge_on=False)
+                )
+            if address == PACKED_BIT_REGISTER:
+                raise ConnectionError("packed bit lost")
+            return FakeResponse(registers=[0] * count)
+
+    pub = PublishCapture()
+    runner = BmsRunner(
+        client=_Client(),  # type: ignore[arg-type]
+        settings=_settings(),
+        slave_addr=1,
+        bms_name="BMS_1",
+        publish=pub,
+    )
+    await runner._poll_once()
+    # Numeric settings still publish; packed bits skipped silently.
+    assert any(
+        t == "BMS_1/control/max_charge_current" for t, _, _, _ in pub.log
+    )
+    assert not any(
+        t == "BMS_1/control/smart_sleep_switch" for t, _, _, _ in pub.log
+    )
+
+
+async def test_packed_bit_register_modbus_error_skipped() -> None:
+    @dataclass
+    class _Client:
+        async def read_holding_registers(
+            self, *, address: int, count: int, device_id: int
+        ) -> Any:
+            if address == BASE_RT:
+                return FakeResponse(registers=_block_a_for_pack_at(voltage_v=53.0, soc=50))
+            if address == SETTINGS_BLOCK_BASE:
+                return FakeResponse(
+                    registers=_settings_block_with(max_charge_a=50.0, charge_on=False)
+                )
+            if address == PACKED_BIT_REGISTER:
+                return FakeResponse(error=True)
+            return FakeResponse(registers=[0] * count)
+
+    pub = PublishCapture()
+    runner = BmsRunner(
+        client=_Client(),  # type: ignore[arg-type]
+        settings=_settings(),
+        slave_addr=1,
+        bms_name="BMS_1",
+        publish=pub,
+    )
+    await runner._poll_once()
+    assert not any(
+        t == "BMS_1/control/smart_sleep_switch" for t, _, _, _ in pub.log
+    )
 
 
 async def test_poll_loop_keeps_running_on_block_a_error(
