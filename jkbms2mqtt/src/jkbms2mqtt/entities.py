@@ -556,17 +556,6 @@ FIXED_SENSORS: Final[tuple[ReadOnlyEntity, ...]] = (
         decimals=None,
         description="BMS serial number.",
     ),
-    ReadOnlyEntity(
-        object_id="cell_type",
-        topic_suffix="Cell_Type",
-        source_field="cell_type",
-        component=Component.SENSOR,
-        device_class=None,
-        state_class=None,
-        unit_of_measurement=None,
-        decimals=None,
-        description="Cell chemistry (LFP / NMC / LTO).",
-    ),
 )
 
 

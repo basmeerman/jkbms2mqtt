@@ -82,7 +82,6 @@ def _sample_static() -> JkStaticInfo:
         hw_version="HW10A20H",
         sw_version="SW1209HE",
         serial_number="JK202401012345",
-        cell_type="LFP",
     )
 
 
@@ -292,7 +291,6 @@ class TestStateMessagesFromStatic:
         assert msgs["BMS_1/fw"] == "HW10A20H"
         assert msgs["BMS_1/sw"] == "SW1209HE"
         assert msgs["BMS_1/serialnb"] == "JK202401012345"
-        assert msgs["BMS_1/Cell_Type"] == "LFP"
 
 
 class TestStateMessagesFromSettings:

@@ -73,16 +73,7 @@ INFO_BLOCK_WORDS: Final = 0x50       # static info block size
 _OFF_MODEL: Final = 0x00            # ASCII 16 bytes (8 words)
 _OFF_HW_VERSION: Final = 0x08       # ASCII  8 bytes (4 words)
 _OFF_SW_VERSION: Final = 0x0C       # ASCII  8 bytes (4 words)
-_OFF_CELL_TYPE: Final = 0x18        # u16 — cell-chemistry code (LFP / NMC / LTO / …)
 _OFF_SERIAL: Final = 0x28           # ASCII 16 bytes (8 words)
-
-
-# Cell-chemistry codes as published by the BMS info block.
-CELL_TYPES: Final = {
-    0: "LFP",
-    1: "NMC",
-    2: "LTO",
-}
 
 
 # -- Alarm bit names (from the V1.0 spec) --------------------------------------------
@@ -189,7 +180,6 @@ class JkStaticInfo:
     hw_version: str
     sw_version: str
     serial_number: str
-    cell_type: str                    # cell-chemistry name (LFP / NMC / LTO / id-N)
 
 
 # -- Primitive helpers ----------------------------------------------------------------
@@ -350,14 +340,11 @@ def decode_static_info(regs: list[int]) -> JkStaticInfo:
         raise ValueError(
             f"regs list too short: got {len(regs)} words, need {INFO_BLOCK_WORDS}"
         )
-    type_id = _u16(regs, _OFF_CELL_TYPE)
-    cell_type = CELL_TYPES.get(type_id, f"id-{type_id}")
     return JkStaticInfo(
         model=_ascii(regs, _OFF_MODEL, 16),
         hw_version=_ascii(regs, _OFF_HW_VERSION, 8),
         sw_version=_ascii(regs, _OFF_SW_VERSION, 8),
         serial_number=_ascii(regs, _OFF_SERIAL, 16),
-        cell_type=cell_type,
     )
 
 

@@ -28,6 +28,7 @@ from jkbms2mqtt.protocol.jk_modbus import BASE_RT, INFO_BLOCK_WORDS
 from jkbms2mqtt.protocol.jk_settings import (
     PACKED_BIT_REGISTER,
     SETTINGS_BLOCK_BASE,
+    SETTINGS_BLOCK_CHUNKS,
     SETTINGS_BLOCK_WORDS,
 )
 
@@ -468,14 +469,22 @@ def _settings_block_with(*, max_charge_a: float = 80.0, charge_on: bool = True) 
     return regs
 
 
+def _settings_chunk_map(slave: int, block: list[int]) -> dict[tuple[int, int], FakeResponse]:
+    """Slice a full settings block into FakeResponses keyed by chunk address."""
+    out: dict[tuple[int, int], FakeResponse] = {}
+    for chunk_addr, chunk_count in SETTINGS_BLOCK_CHUNKS:
+        off = chunk_addr - SETTINGS_BLOCK_BASE
+        out[(slave, chunk_addr)] = FakeResponse(registers=block[off : off + chunk_count])
+    return out
+
+
 async def test_settings_block_state_published() -> None:
+    block = _settings_block_with(max_charge_a=80.0, charge_on=True)
     client = FakeClient(
         map={
             (1, BASE_RT): FakeResponse(registers=_block_a_for_pack_at(voltage_v=53.0, soc=50)),
-            (1, SETTINGS_BLOCK_BASE): FakeResponse(
-                registers=_settings_block_with(max_charge_a=80.0, charge_on=True)
-            ),
             (1, PACKED_BIT_REGISTER): FakeResponse(registers=[0x0040]),  # smart_sleep on
+            **_settings_chunk_map(1, block),
         }
     )
     pub = PublishCapture()
@@ -495,7 +504,11 @@ async def test_settings_block_state_published() -> None:
     assert by_topic.get("BMS_1/control/smart_sleep_switch") == "ON"
 
 
-async def test_settings_block_modbus_error_skipped() -> None:
+def _settings_chunk_addrs() -> tuple[int, ...]:
+    return tuple(addr for addr, _ in SETTINGS_BLOCK_CHUNKS)
+
+
+async def test_settings_block_modbus_error_skipped(caplog: pytest.LogCaptureFixture) -> None:
     @dataclass
     class _Client:
         async def read_holding_registers(
@@ -503,7 +516,7 @@ async def test_settings_block_modbus_error_skipped() -> None:
         ) -> Any:
             if address == BASE_RT:
                 return FakeResponse(registers=_block_a_for_pack_at(voltage_v=53.0, soc=50))
-            if address == SETTINGS_BLOCK_BASE:
+            if address in _settings_chunk_addrs():
                 return FakeResponse(error=True)
             return FakeResponse(registers=[0] * count)
 
@@ -515,11 +528,14 @@ async def test_settings_block_modbus_error_skipped() -> None:
         bms_name="BMS_1",
         publish=pub,
     )
-    await runner._poll_once()
+    with caplog.at_level("WARNING"):
+        await runner._poll_once()
     # State (block A) still publishes; settings topic does not.
     assert not any(
         t == "BMS_1/control/max_charge_current" for t, _, _, _ in pub.log
     )
+    # First-time failure surfaces at WARNING so the user can see it.
+    assert any("settings readback failed" in rec.message for rec in caplog.records)
 
 
 async def test_settings_block_timeout_skipped() -> None:
@@ -530,7 +546,7 @@ async def test_settings_block_timeout_skipped() -> None:
         ) -> Any:
             if address == BASE_RT:
                 return FakeResponse(registers=_block_a_for_pack_at(voltage_v=53.0, soc=50))
-            if address == SETTINGS_BLOCK_BASE:
+            if address in _settings_chunk_addrs():
                 raise TimeoutError("settings slow")
             return FakeResponse(registers=[0] * count)
 
@@ -544,7 +560,21 @@ async def test_settings_block_timeout_skipped() -> None:
     await runner._poll_once()
 
 
-async def test_packed_bit_register_read_failure_skipped() -> None:
+async def test_one_settings_chunk_failure_still_publishes_other_chunk() -> None:
+    """Partial chunk failure must not block publishing settings from the chunk that succeeded."""
+    # Place balance_trigger_voltage (0x1014, U32_MILLI, 0.003..1.000) in the
+    # block. It lives in chunk 1 (0x1000..0x1063) so it survives a chunk-2 failure.
+    block = [0] * SETTINGS_BLOCK_WORDS
+    btv_addr = 0x1014  # balance_trigger_voltage
+    raw = int(round(0.005 * 1000))  # 5 mV → matches U32_MILLI scaling
+    off = btv_addr - SETTINGS_BLOCK_BASE
+    block[off] = (raw >> 16) & 0xFFFF
+    block[off + 1] = raw & 0xFFFF
+
+    chunk_addrs = _settings_chunk_addrs()
+    first_chunk_addr = chunk_addrs[0]
+    second_chunk_addr = chunk_addrs[1]
+
     @dataclass
     class _Client:
         async def read_holding_registers(
@@ -552,10 +582,92 @@ async def test_packed_bit_register_read_failure_skipped() -> None:
         ) -> Any:
             if address == BASE_RT:
                 return FakeResponse(registers=_block_a_for_pack_at(voltage_v=53.0, soc=50))
-            if address == SETTINGS_BLOCK_BASE:
-                return FakeResponse(
-                    registers=_settings_block_with(max_charge_a=50.0, charge_on=False)
-                )
+            if address == first_chunk_addr:
+                off = first_chunk_addr - SETTINGS_BLOCK_BASE
+                return FakeResponse(registers=block[off : off + count])
+            if address == second_chunk_addr:
+                return FakeResponse(error=True)
+            return FakeResponse(registers=[0] * count)
+
+    pub = PublishCapture()
+    runner = BmsRunner(
+        client=_Client(),  # type: ignore[arg-type]
+        settings=_settings(),
+        slave_addr=1,
+        bms_name="BMS_1",
+        publish=pub,
+    )
+    await runner._poll_once()
+    by_topic = {t: p for t, p, _, _ in pub.log}
+    assert by_topic.get("BMS_1/control/balance_trigger_voltage") == "0.005"
+
+
+async def test_settings_first_log_only_emits_once(caplog: pytest.LogCaptureFixture) -> None:
+    """The introductory INFO line should fire once per BMS, not every cycle."""
+    block = _settings_block_with()
+    client = FakeClient(
+        map={
+            (1, BASE_RT): FakeResponse(registers=_block_a_for_pack_at(voltage_v=53.0, soc=50)),
+            (1, PACKED_BIT_REGISTER): FakeResponse(registers=[0x0000]),
+            **_settings_chunk_map(1, block),
+        }
+    )
+    pub = PublishCapture()
+    runner = BmsRunner(
+        client=client,  # type: ignore[arg-type]
+        settings=_settings(),
+        slave_addr=1,
+        bms_name="BMS_1",
+        publish=pub,
+    )
+    with caplog.at_level("INFO"):
+        await runner._poll_once()
+        await runner._poll_once()
+    info_lines = [r for r in caplog.records if "settings readback OK" in r.message]
+    assert len(info_lines) == 1
+
+
+async def test_settings_failure_log_only_once_per_bms(caplog: pytest.LogCaptureFixture) -> None:
+    """A persistent settings failure should emit one WARNING, not one per cycle."""
+    @dataclass
+    class _Client:
+        async def read_holding_registers(
+            self, *, address: int, count: int, device_id: int
+        ) -> Any:
+            if address == BASE_RT:
+                return FakeResponse(registers=_block_a_for_pack_at(voltage_v=53.0, soc=50))
+            if address in _settings_chunk_addrs():
+                return FakeResponse(error=True)
+            return FakeResponse(registers=[0] * count)
+
+    runner = BmsRunner(
+        client=_Client(),  # type: ignore[arg-type]
+        settings=_settings(),
+        slave_addr=1,
+        bms_name="BMS_1",
+        publish=PublishCapture(),
+    )
+    with caplog.at_level("WARNING"):
+        await runner._poll_once()
+        await runner._poll_once()
+        await runner._poll_once()
+    warn_lines = [r for r in caplog.records if "settings readback failed" in r.message]
+    assert len(warn_lines) == 1
+
+
+async def test_packed_bit_register_read_failure_skipped() -> None:
+    block = _settings_block_with(max_charge_a=50.0, charge_on=False)
+
+    @dataclass
+    class _Client:
+        async def read_holding_registers(
+            self, *, address: int, count: int, device_id: int
+        ) -> Any:
+            if address == BASE_RT:
+                return FakeResponse(registers=_block_a_for_pack_at(voltage_v=53.0, soc=50))
+            if address in _settings_chunk_addrs():
+                off = address - SETTINGS_BLOCK_BASE
+                return FakeResponse(registers=block[off : off + count])
             if address == PACKED_BIT_REGISTER:
                 raise ConnectionError("packed bit lost")
             return FakeResponse(registers=[0] * count)
@@ -579,6 +691,8 @@ async def test_packed_bit_register_read_failure_skipped() -> None:
 
 
 async def test_packed_bit_register_modbus_error_skipped() -> None:
+    block = _settings_block_with(max_charge_a=50.0, charge_on=False)
+
     @dataclass
     class _Client:
         async def read_holding_registers(
@@ -586,10 +700,9 @@ async def test_packed_bit_register_modbus_error_skipped() -> None:
         ) -> Any:
             if address == BASE_RT:
                 return FakeResponse(registers=_block_a_for_pack_at(voltage_v=53.0, soc=50))
-            if address == SETTINGS_BLOCK_BASE:
-                return FakeResponse(
-                    registers=_settings_block_with(max_charge_a=50.0, charge_on=False)
-                )
+            if address in _settings_chunk_addrs():
+                off = address - SETTINGS_BLOCK_BASE
+                return FakeResponse(registers=block[off : off + count])
             if address == PACKED_BIT_REGISTER:
                 return FakeResponse(error=True)
             return FakeResponse(registers=[0] * count)
