@@ -87,7 +87,6 @@ commanding a new value posts to `<topic>/set`.
 | `fw` | `hw_version` | Hardware version |
 | `sw` | `sw_version` | Software / firmware version |
 | `serialnb` | `serial_number` | Serial number |
-| `Cell_Type` | `cell_type` | Cell chemistry (`LFP` / `NMC` / `LTO` / `id-N`) |
 
 ## Read / write — basic tier
 
@@ -159,6 +158,10 @@ on the BLE / UART-TTL protocol variants and so cannot be added to this bridge:
   `Switch_Balance` boolean + `Balance_current` are provided)
 - `can_protocols_enabled_bitmask` — BLE-only readback of an inverter-protocol
   configuration
+
+`cell_type` (cell chemistry — LFP / NMC / LTO) is reported via the BLE
+protocol but does not appear to have a stable Modbus register address across
+firmware variants. Pending a verified register location it is not exposed.
 
 `online_status` is implicit: the bridge does not publish state messages while
 the BMS is unreachable, and HA shows the entity as unavailable until a fresh

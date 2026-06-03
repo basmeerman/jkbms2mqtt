@@ -46,6 +46,7 @@ from jkbms2mqtt.protocol.jk_settings import (
     PACKED_BITS,
     SAFETY_REGISTERS,
     SETTINGS_BLOCK_BASE,
+    SETTINGS_BLOCK_CHUNKS,
     SETTINGS_BLOCK_WORDS,
     EncodeError,
     decode_packed_bit_value,
@@ -82,6 +83,7 @@ class BmsRunner:
     _cell_count: int = field(default=16, init=False)
     _discovery_announced: bool = field(default=False, init=False)
     _static_info_published: bool = field(default=False, init=False)
+    _settings_first_log_done: bool = field(default=False, init=False)
 
     async def announce_discovery(self) -> None:
         """Publish retained HA Discovery for every appropriate entity."""
@@ -213,9 +215,9 @@ class BmsRunner:
             return
         info = decode_static_info(resp.registers)
         logger.info(
-            "BMS %d: model=%r hw=%r sw=%r serial=%r cell_type=%r",
+            "BMS %d: model=%r hw=%r sw=%r serial=%r",
             self.slave_addr,
-            info.model, info.hw_version, info.sw_version, info.serial_number, info.cell_type,
+            info.model, info.hw_version, info.sw_version, info.serial_number,
         )
         for topic, payload in state_messages_from_static(info, self.bms_name):
             await self.publish(topic, payload, 0, True)
@@ -224,27 +226,66 @@ class BmsRunner:
     async def _poll_settings(self) -> None:
         """Read the writable-settings block + packed-bit register, publish state.
 
-        Best-effort: any failure here is logged at debug and the cycle moves
-        on. Settings rarely change, so a stale value is fine. Writing always
-        updates the topic immediately via the write executor.
+        The 0x1000..0x1085 settings range exceeds the 125-register Modbus 0x03
+        ceiling, so we read it as multiple chunks defined in
+        ``SETTINGS_BLOCK_CHUNKS`` and stitch into a single buffer. Only
+        registers whose entire word range was actually read get decoded —
+        partial failures don't produce phantom zeros.
+
+        Settings rarely change, so reading every cycle is fine. The write
+        executor always echoes new values to the same topic on success.
         """
-        try:
-            resp = await self.client.read_holding_registers(
-                address=SETTINGS_BLOCK_BASE,
-                count=SETTINGS_BLOCK_WORDS,
-                device_id=self.slave_addr,
-            )
-        except (TimeoutError, ConnectionError) as exc:
-            logger.debug("BMS %d: settings read failed: %s", self.slave_addr, exc)
-            return
-        if resp.isError():
+        regs = [0] * SETTINGS_BLOCK_WORDS
+        read_addresses: set[int] = set()
+        failures: list[str] = []
+        for chunk_addr, chunk_count in SETTINGS_BLOCK_CHUNKS:
+            try:
+                resp = await self.client.read_holding_registers(
+                    address=chunk_addr,
+                    count=chunk_count,
+                    device_id=self.slave_addr,
+                )
+            except (TimeoutError, ConnectionError) as exc:
+                failures.append(f"chunk @ {chunk_addr:#06x}: {exc}")
+                continue
+            if resp.isError():
+                failures.append(f"chunk @ {chunk_addr:#06x}: Modbus error {resp}")
+                continue
+            off = chunk_addr - SETTINGS_BLOCK_BASE
+            # A pymodbus stub / gateway may return more registers than asked;
+            # only honour the count we requested.
+            for i, v in enumerate(resp.registers[:chunk_count]):
+                regs[off + i] = v
+                read_addresses.add(chunk_addr + i)
+
+        # Log first outcome at INFO/WARNING — silent failure here is the most
+        # common reason settings show as "unknown" in HA, so the user needs to
+        # see it once on startup. Subsequent failures stay at DEBUG to avoid
+        # log spam.
+        if not self._settings_first_log_done:
+            if failures:
+                logger.warning(
+                    "BMS %d: settings readback failed (%s); HA will show 'unknown' "
+                    "for the affected settings",
+                    self.slave_addr, "; ".join(failures),
+                )
+            elif read_addresses:  # pragma: no branch - empty chunks list is unreachable
+                logger.info(
+                    "BMS %d: settings readback OK (%d registers)",
+                    self.slave_addr, len(read_addresses),
+                )
+            self._settings_first_log_done = True
+        elif failures:
             logger.debug(
-                "BMS %d: settings returned Modbus error: %s", self.slave_addr, resp
+                "BMS %d: settings readback failures: %s",
+                self.slave_addr, "; ".join(failures),
             )
-            return
-        regs = list(resp.registers)
+
         register_values: dict[object, float | bool] = {}
         for r in (*BASIC_REGISTERS, *SAFETY_REGISTERS):
+            # Only decode if both words of this 32-bit setting were actually read.
+            if r.address not in read_addresses or (r.address + 1) not in read_addresses:
+                continue
             try:
                 register_values[r] = decode_register_value(r, regs)
             except EncodeError as exc:  # pragma: no cover - defensive

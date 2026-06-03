@@ -216,10 +216,16 @@ def _i32_to_words(value: int) -> list[int]:
 
 # -- Decoders (settings readback) -----------------------------------------------------
 
-# Cover every writable RegisterDef. Read as one contiguous Modbus 0x03 — the
-# 0x1000..0x1085 range fits inside the 125-word Modbus read limit.
+# Cover every writable RegisterDef. The full 0x1000..0x1085 range is 134
+# registers, which exceeds the 125-register Modbus FC 0x03 ceiling, so the
+# runner reads it as two chunks and stitches them into a single buffer indexed
+# from SETTINGS_BLOCK_BASE.
 SETTINGS_BLOCK_BASE: Final = 0x1000
-SETTINGS_BLOCK_WORDS: Final = 0x86     # 0x1000..0x1085 covers every BASIC + SAFETY reg
+SETTINGS_BLOCK_WORDS: Final = 0x86     # buffer size — covers every BASIC + SAFETY reg
+SETTINGS_BLOCK_CHUNKS: Final = (
+    (0x1000, 100),    # 0x1000..0x1063
+    (0x1064, 0x86 - 100),   # 0x1064..0x1085
+)
 
 # The packed-bit register lives well above the settings block — read it separately.
 # The settings-block decoder below uses ``len(regs)`` to bounds-check, so an
