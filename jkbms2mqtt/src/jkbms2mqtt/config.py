@@ -68,6 +68,11 @@ class Settings(BaseModel):
     enable_basic_writes: bool = False
     enable_safety_writes: bool = False
 
+    # Surface entities whose Modbus offset has not yet been confirmed against
+    # real hardware. Off by default — these entities would otherwise publish
+    # plausibly-shaped but unverified values.
+    debug_unverified_fields: bool = False
+
     log_level: LogLevel = LogLevel.INFO
     recording_enabled: bool = False
 

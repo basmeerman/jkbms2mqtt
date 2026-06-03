@@ -102,22 +102,38 @@ class TestBuildDiscoveryMessages:
         s = _settings()
         msgs = build_discovery_messages(settings=s, bms_name="BMS_1", cell_count=16)
         topics = [m.topic for m in msgs]
-        # Writables show up as sensor / binary_sensor — never silently hidden.
+        # Both basic + safety numeric writables show up as plain sensor when
+        # their tier is off — never silently hidden.
         assert any(
             "/sensor/BMS_1_device_max_charge_current/config" in t for t in topics
         )
         assert any(
-            "/binary_sensor/BMS_1_device_charging_switch/config" in t for t in topics
+            "/sensor/BMS_1_device_smart_sleep_voltage/config" in t for t in topics
         )
-        assert any(
-            "/binary_sensor/BMS_1_device_smart_sleep_switch/config" in t for t in topics
-        )
+
+    def test_unverified_entities_hidden_by_default(self) -> None:
+        s = _settings()
+        msgs = build_discovery_messages(settings=s, bms_name="BMS_1", cell_count=16)
+        topics = [m.topic for m in msgs]
+        # Packed-bit entities and the heating / charge_status fields are
+        # unverified and so should not appear unless debug flag is on.
+        assert not any("BMS_1_device_smart_sleep_switch" in t for t in topics)
+        assert not any("BMS_1_device_heating" in t for t in topics)
+        assert not any("BMS_1_device_charge_status" in t for t in topics)
+
+    def test_unverified_entities_surface_with_debug_flag(self) -> None:
+        s = _settings(debug_unverified_fields=True)
+        msgs = build_discovery_messages(settings=s, bms_name="BMS_1", cell_count=16)
+        topics = [m.topic for m in msgs]
+        assert any("BMS_1_device_smart_sleep_switch" in t for t in topics)
+        assert any("BMS_1_device_heating" in t for t in topics)
 
     def test_basic_writables_when_basic_on(self) -> None:
         s = _settings(enable_basic_writes=True)
         msgs = build_discovery_messages(settings=s, bms_name="BMS_1", cell_count=16)
         topics = [m.topic for m in msgs]
-        assert any("/switch/BMS_1_device_charging_switch/config" in t for t in topics)
+        # Basic-tier numeric is now a `number`.
+        assert any("/number/BMS_1_device_smart_sleep_voltage/config" in t for t in topics)
         # Safety-tier max_charge_current still appears, just as a sensor.
         assert any("/sensor/BMS_1_device_max_charge_current/config" in t for t in topics)
         assert not any("/number/BMS_1_device_max_charge_current/config" in t for t in topics)
@@ -127,12 +143,17 @@ class TestBuildDiscoveryMessages:
         msgs = build_discovery_messages(settings=s, bms_name="BMS_1", cell_count=16)
         topics = [m.topic for m in msgs]
         assert any("/number/BMS_1_device_max_charge_current/config" in t for t in topics)
-        # Basic-tier charging_switch shows up as binary_sensor.
-        assert any("/binary_sensor/BMS_1_device_charging_switch/config" in t for t in topics)
-        assert not any("/switch/BMS_1_device_charging_switch/config" in t for t in topics)
+        # Basic-tier numeric shows up as sensor.
+        assert any("/sensor/BMS_1_device_smart_sleep_voltage/config" in t for t in topics)
+        assert not any("/number/BMS_1_device_smart_sleep_voltage/config" in t for t in topics)
 
-    def test_both_toggles_on_publishes_packed_bit_too(self) -> None:
-        s = _settings(enable_basic_writes=True, enable_safety_writes=True)
+    def test_both_toggles_on_with_debug_publishes_packed_bit_as_switch(self) -> None:
+        # Packed bits are unverified — they require debug_unverified_fields=True
+        # to appear at all, and basic tier on to be writable.
+        s = _settings(
+            enable_basic_writes=True, enable_safety_writes=True,
+            debug_unverified_fields=True,
+        )
         msgs = build_discovery_messages(settings=s, bms_name="BMS_1", cell_count=16)
         topics = [m.topic for m in msgs]
         assert any("/switch/BMS_1_device_smart_sleep_switch/config" in t for t in topics)
@@ -179,7 +200,8 @@ class TestDiscoveryPayloads:
         assert p["command_topic"] == "BMS_1/control/max_charge_current/set"
         assert p["min"] == 0
         assert p["max"] == 600
-        assert p["step"] == 0.1
+        # max_charge_current now U32_MILLI (1 mA step) on this firmware.
+        assert p["step"] == 0.001
         assert p["unit_of_measurement"] == "A"
 
     def test_writable_number_when_tier_disabled_becomes_sensor(self) -> None:
@@ -192,7 +214,22 @@ class TestDiscoveryPayloads:
         assert msg.payload["state_topic"] == "BMS_1/control/max_charge_current"
 
     def test_writable_switch_when_tier_enabled(self) -> None:
-        w = next(x for x in WRITABLE_ENTITIES if x.object_id == "charging_switch")
+        # No BOOL32 writable currently in the verified register table — build a
+        # synthetic one to exercise the switch / binary-sensor discovery branch.
+        from jkbms2mqtt.entities import Component, WritableEntity
+        from jkbms2mqtt.protocol.jk_settings import Encoding, RegisterDef, WriteTier
+        reg = RegisterDef(
+            name="synthetic_switch", address=0x1090, encoding=Encoding.BOOL32,
+            min_value=0, max_value=1, step=1, unit=None,
+            tier=WriteTier.BASIC, description="test switch",
+        )
+        w = WritableEntity(
+            object_id="synthetic_switch",
+            topic_suffix="control/synthetic_switch",
+            register=reg,
+            component=Component.SWITCH,
+            description="test switch",
+        )
         msg = discovery_for_writable(
             w, "BMS_1", discovery_prefix="homeassistant", writable=True
         )
@@ -201,7 +238,20 @@ class TestDiscoveryPayloads:
         assert msg.payload["state_off"] == "OFF"
 
     def test_writable_switch_when_tier_disabled_becomes_binary_sensor(self) -> None:
-        w = next(x for x in WRITABLE_ENTITIES if x.object_id == "charging_switch")
+        from jkbms2mqtt.entities import Component, WritableEntity
+        from jkbms2mqtt.protocol.jk_settings import Encoding, RegisterDef, WriteTier
+        reg = RegisterDef(
+            name="synthetic_switch", address=0x1090, encoding=Encoding.BOOL32,
+            min_value=0, max_value=1, step=1, unit=None,
+            tier=WriteTier.BASIC, description="test switch",
+        )
+        w = WritableEntity(
+            object_id="synthetic_switch",
+            topic_suffix="control/synthetic_switch",
+            register=reg,
+            component=Component.SWITCH,
+            description="test switch",
+        )
         msg = discovery_for_writable(
             w, "BMS_1", discovery_prefix="homeassistant", writable=False
         )
@@ -294,7 +344,7 @@ class TestStateMessagesFromStatic:
 
 
 class TestStateMessagesFromSettings:
-    def test_emits_numeric_and_boolean_topics(self) -> None:
+    def test_emits_numeric_topics(self) -> None:
         from jkbms2mqtt.protocol.jk_settings import (
             BASIC_REGISTERS,
             PACKED_BITS,
@@ -302,19 +352,34 @@ class TestStateMessagesFromSettings:
         )
 
         max_chg = next(r for r in SAFETY_REGISTERS if r.name == "max_charge_current")
-        charging = next(r for r in BASIC_REGISTERS if r.name == "charging_switch")
+        sleep_v = next(r for r in BASIC_REGISTERS if r.name == "smart_sleep_voltage")
         sleep_bit = next(b for b in PACKED_BITS if b.name == "smart_sleep_switch")
 
         msgs = dict(
             state_messages_from_settings(
-                register_values={max_chg: 80.0, charging: True},
+                register_values={max_chg: 40.0, sleep_v: 3.500},
+                packed_values={sleep_bit: True},
+                bms_name="BMS_1",
+                debug_unverified=True,  # packed bits are unverified by default
+            )
+        )
+        # max_charge_current uses U32_MILLI now → 3 decimals.
+        assert msgs["BMS_1/control/max_charge_current"] == "40.000"
+        assert msgs["BMS_1/control/smart_sleep_voltage"] == "3.500"
+        assert msgs["BMS_1/control/smart_sleep_switch"] == "ON"
+
+    def test_packed_bits_hidden_without_debug_flag(self) -> None:
+        from jkbms2mqtt.protocol.jk_settings import PACKED_BITS
+
+        sleep_bit = next(b for b in PACKED_BITS if b.name == "smart_sleep_switch")
+        msgs = dict(
+            state_messages_from_settings(
+                register_values={},
                 packed_values={sleep_bit: True},
                 bms_name="BMS_1",
             )
         )
-        assert msgs["BMS_1/control/max_charge_current"] == "80.0"
-        assert msgs["BMS_1/control/charging_switch"] == "ON"
-        assert msgs["BMS_1/control/smart_sleep_switch"] == "ON"
+        assert msgs == {}
 
     def test_skips_registers_without_value(self) -> None:
         msgs = state_messages_from_settings(

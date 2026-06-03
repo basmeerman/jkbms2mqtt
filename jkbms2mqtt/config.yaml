@@ -40,6 +40,7 @@ options:
   bms_name_prefix: BMS
   enable_basic_writes: false
   enable_safety_writes: false
+  debug_unverified_fields: false
   log_level: info
   recording_enabled: false
 
@@ -61,5 +62,6 @@ schema:
   bms_name_prefix: str
   enable_basic_writes: bool
   enable_safety_writes: bool
+  debug_unverified_fields: bool
   log_level: list(debug|info|warning|error)
   recording_enabled: bool

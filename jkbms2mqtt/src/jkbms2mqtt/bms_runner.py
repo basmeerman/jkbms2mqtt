@@ -119,7 +119,10 @@ class BmsRunner:
             self._cell_count = live.cell_count
             self._discovery_announced = False
             await self.announce_discovery()
-        for topic, payload in state_messages_from_live(live, self.bms_name):
+        for topic, payload in state_messages_from_live(
+            live, self.bms_name,
+            debug_unverified=self.settings.debug_unverified_fields,
+        ):
             await self.publish(topic, payload, 0, False)
         await self._poll_static_info_if_needed()
         await self._poll_settings()
@@ -311,5 +314,6 @@ class BmsRunner:
             register_values=register_values,  # type: ignore[arg-type]
             packed_values=packed_values,       # type: ignore[arg-type]
             bms_name=self.bms_name,
+            debug_unverified=self.settings.debug_unverified_fields,
         ):
             await self.publish(topic, payload, 0, True)

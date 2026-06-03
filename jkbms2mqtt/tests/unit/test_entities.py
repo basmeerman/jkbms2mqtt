@@ -104,16 +104,12 @@ class TestCellExpansion:
 
 
 class TestWritables:
-    def test_switch_writables_carry_a_bool_encoding(self) -> None:
-        from jkbms2mqtt.protocol.jk_settings import Encoding
-        by_id = {w.object_id: w for w in WRITABLE_ENTITIES}
-        assert by_id["charging_switch"].register.encoding is Encoding.BOOL32
-        assert by_id["balance_switch"].register.encoding is Encoding.BOOL32
-
     def test_number_writables_carry_a_numeric_encoding(self) -> None:
         from jkbms2mqtt.protocol.jk_settings import Encoding
         by_id = {w.object_id: w for w in WRITABLE_ENTITIES}
-        assert by_id["max_charge_current"].register.encoding is Encoding.U32_DECI
+        # Verified against BMS_1 capture: currents are stored as mA (U32_MILLI),
+        # not deci-A as the previous table claimed.
+        assert by_id["max_charge_current"].register.encoding is Encoding.U32_MILLI
         assert by_id["balance_trigger_voltage"].register.encoding is Encoding.U32_MILLI
 
     def test_writables_use_control_prefix(self) -> None:
@@ -124,8 +120,8 @@ class TestWritables:
 
     def test_writable_lookup_keyed_by_set_topic(self) -> None:
         lookup = writable_by_command_topic_suffix()
-        assert "control/charging_switch/set" in lookup
         assert "control/max_charge_current/set" in lookup
+        assert "control/smart_sleep_voltage/set" in lookup
         assert "control/smart_sleep_switch/set" in lookup
 
 

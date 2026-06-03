@@ -56,9 +56,9 @@ class TestRegisterTable:
         assert reg.encoding in Encoding
 
     def test_find_register_hits(self) -> None:
-        r = find_register("balance_switch")
+        r = find_register("max_charge_current")
         assert r is not None
-        assert r.address == 0x1078
+        assert r.address == 0x1016
 
     def test_find_register_miss(self) -> None:
         assert find_register("not_a_real_param") is None
@@ -84,16 +84,30 @@ class TestRegisterTable:
         assert must_be_safety <= safety_names
 
 
+def _bool_reg() -> RegisterDef:
+    """Synthetic BOOL32 register — no real BMS field currently uses this encoding."""
+    return RegisterDef(
+        name="bool_test", address=0x0010, encoding=Encoding.BOOL32,
+        min_value=0, max_value=1, step=1, unit=None,
+        tier=WriteTier.BASIC, description="test",
+    )
+
+
+def _deci_reg() -> RegisterDef:
+    """Synthetic U32_DECI register — kept available for future BMS firmware variants."""
+    return RegisterDef(
+        name="deci_test", address=0x0020, encoding=Encoding.U32_DECI,
+        min_value=0, max_value=600, step=0.1, unit="A",
+        tier=WriteTier.SAFETY, description="test",
+    )
+
+
 class TestEncodeValueBool32:
     def test_true(self) -> None:
-        reg = find_register("balance_switch")
-        assert reg is not None
-        assert encode_value_to_words(reg, True) == [0, 1]
+        assert encode_value_to_words(_bool_reg(), True) == [0, 1]
 
     def test_false(self) -> None:
-        reg = find_register("balance_switch")
-        assert reg is not None
-        assert encode_value_to_words(reg, False) == [0, 0]
+        assert encode_value_to_words(_bool_reg(), False) == [0, 0]
 
 
 class TestEncodeValueU32Milli:
@@ -103,13 +117,17 @@ class TestEncodeValueU32Milli:
         # 3.65 V → 3650 mV → [0x0000, 0x0E42]
         assert encode_value_to_words(reg, 3.65) == [0, 3650]
 
+    def test_current_scales_to_milliamps(self) -> None:
+        reg = find_register("max_charge_current")
+        assert reg is not None
+        # 40.0 A → 40000 mA → [0x0000, 0x9C40]
+        assert encode_value_to_words(reg, 40.0) == [0, 0x9C40]
+
 
 class TestEncodeValueU32Deci:
     def test_current_scales_to_deci_amps(self) -> None:
-        reg = find_register("max_charge_current")
-        assert reg is not None
         # 50 A → 500 deci-A → [0, 500]
-        assert encode_value_to_words(reg, 50.0) == [0, 500]
+        assert encode_value_to_words(_deci_reg(), 50.0) == [0, 500]
 
 
 class TestEncodeValueI32Deci:
@@ -244,10 +262,17 @@ class TestDecodeRegisterValue:
         assert decode_register_value(r, regs) == pytest.approx(0.300, abs=1e-3)
 
     def test_u32_deci_roundtrip(self, regs: list[int]) -> None:
+        """No current BMS field uses U32_DECI — exercise via synthetic reg."""
         from jkbms2mqtt.protocol.jk_settings import decode_register_value
-        r = next(x for x in SAFETY_REGISTERS if x.encoding is Encoding.U32_DECI)
-        self._place(regs, r, 50.0)
-        assert decode_register_value(r, regs) == pytest.approx(50.0)
+        r = _deci_reg()
+        # Place inside the settings buffer at an arbitrary in-block address.
+        synth = RegisterDef(
+            name=r.name, address=0x1000 + 0x10, encoding=r.encoding,
+            min_value=r.min_value, max_value=r.max_value, step=r.step,
+            unit=r.unit, tier=r.tier, description=r.description,
+        )
+        self._place(regs, synth, 50.0)
+        assert decode_register_value(synth, regs) == pytest.approx(50.0)
 
     def test_i32_deci_negative_roundtrip(self, regs: list[int]) -> None:
         from jkbms2mqtt.protocol.jk_settings import decode_register_value
@@ -257,15 +282,23 @@ class TestDecodeRegisterValue:
 
     def test_bool32_roundtrip_on(self, regs: list[int]) -> None:
         from jkbms2mqtt.protocol.jk_settings import decode_register_value
-        r = next(x for x in BASIC_REGISTERS if x.encoding is Encoding.BOOL32)
-        self._place(regs, r, True)
-        assert decode_register_value(r, regs) is True
+        synth = RegisterDef(
+            name="bool_test", address=0x1000 + 0x20, encoding=Encoding.BOOL32,
+            min_value=0, max_value=1, step=1, unit=None,
+            tier=WriteTier.BASIC, description="test",
+        )
+        self._place(regs, synth, True)
+        assert decode_register_value(synth, regs) is True
 
     def test_bool32_roundtrip_off(self, regs: list[int]) -> None:
         from jkbms2mqtt.protocol.jk_settings import decode_register_value
-        r = next(x for x in BASIC_REGISTERS if x.encoding is Encoding.BOOL32)
-        self._place(regs, r, False)
-        assert decode_register_value(r, regs) is False
+        synth = RegisterDef(
+            name="bool_test", address=0x1000 + 0x20, encoding=Encoding.BOOL32,
+            min_value=0, max_value=1, step=1, unit=None,
+            tier=WriteTier.BASIC, description="test",
+        )
+        self._place(regs, synth, False)
+        assert decode_register_value(synth, regs) is False
 
     def test_out_of_block_register_rejected(self) -> None:
         from jkbms2mqtt.protocol.jk_settings import decode_register_value

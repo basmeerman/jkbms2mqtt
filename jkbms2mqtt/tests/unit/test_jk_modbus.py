@@ -203,9 +203,11 @@ class TestDecodeRealtime:
         _set_i16(regs, 0x45, 250)           # MOS 25.0 °C
         _set_i16(regs, 0x4E, -50)           # probe 1 = −5.0 °C
         _set_i16(regs, 0x4F, 380)           # probe 2 = 38.0 °C
-        _set_i16(regs, 0x7C, -100)          # probe 3 = −10.0 °C
-        _set_i16(regs, 0x7D, 250)           # probe 4
-        _set_i16(regs, 0x7E, 250)           # probe 5
+        # Probes 3/4/5 live in block C (offset 0xF4..0xF6 in the stitched buffer),
+        # not in block B as the previous offsets 0x7C..0x7E implied.
+        _set_i16(regs, 0xF4, -100)          # probe 3 = −10.0 °C
+        _set_i16(regs, 0xF5, 250)           # probe 4
+        _set_i16(regs, 0xF6, 250)           # probe 5
         result = decode_realtime(regs)
         assert result.mos_temp_c == pytest.approx(25.0)
         assert result.probe_1_temp_c == pytest.approx(-5.0)

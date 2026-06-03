@@ -125,34 +125,38 @@ def test_parse_numeric_payload() -> None:
 # -- Single-register writes ------------------------------------------------------------
 
 
-async def test_basic_switch_write_round_trip() -> None:
+async def test_basic_number_write_round_trip() -> None:
+    """Round-trip a verified basic-tier numeric write to confirm address + encoding."""
     client = FakeClient()
     pub = PublishLog()
     exec_ = WriteExecutor(client=client, settings=_settings(), publish=pub)  # type: ignore[arg-type]
     await exec_._handle_one(
         WriteRequest(
-            bms_name="BMS_1", slave_addr=1, object_id="charging_switch", raw_payload="ON"
+            bms_name="BMS_1", slave_addr=1, object_id="smart_sleep_voltage", raw_payload="3.5"
         )
     )
-    assert client.last_write_address == 0x1070
-    assert client.last_write_values == [0, 1]
+    assert client.last_write_address == 0x1000
+    # U32_MILLI: 3.5 → 3500 → [0x0000, 0x0DAC]
+    assert client.last_write_values == [0, 0x0DAC]
     assert client.last_write_slave == 1
-    assert ("BMS_1/control/charging_switch", "ON") in pub.log
+    assert ("BMS_1/control/smart_sleep_voltage", "3.500") in pub.log
 
 
 async def test_safety_number_write() -> None:
+    """max_charge_current at the verified address 0x1016 with mA encoding."""
     client = FakeClient()
     pub = PublishLog()
     exec_ = WriteExecutor(client=client, settings=_settings(), publish=pub)  # type: ignore[arg-type]
     await exec_._handle_one(
         WriteRequest(
-            bms_name="BMS_1", slave_addr=2, object_id="max_charge_current", raw_payload="80.0"
+            bms_name="BMS_1", slave_addr=2, object_id="max_charge_current", raw_payload="40.0"
         )
     )
-    assert client.last_write_address == 0x102C
-    assert client.last_write_values == [0, 800]
+    assert client.last_write_address == 0x1016
+    # U32_MILLI: 40.0 A → 40000 mA → [0x0000, 0x9C40]
+    assert client.last_write_values == [0, 0x9C40]
     assert client.last_write_slave == 2
-    assert ("BMS_1/control/max_charge_current", "80.000") in pub.log
+    assert ("BMS_1/control/max_charge_current", "40.000") in pub.log
 
 
 async def test_basic_tier_disabled_refuses() -> None:
@@ -161,7 +165,7 @@ async def test_basic_tier_disabled_refuses() -> None:
     exec_ = WriteExecutor(client=client, settings=_settings(basic=False), publish=pub)  # type: ignore[arg-type]
     await exec_._handle_one(
         WriteRequest(
-            bms_name="BMS_1", slave_addr=1, object_id="charging_switch", raw_payload="ON"
+            bms_name="BMS_1", slave_addr=1, object_id="smart_sleep_voltage", raw_payload="3.5"
         )
     )
     assert client.last_write_address is None
@@ -209,12 +213,13 @@ async def test_garbage_numeric_payload_rejected() -> None:
 
 
 async def test_garbage_boolean_payload_rejected() -> None:
+    """Boolean parsing is exercised via a packed-bit entity (no BOOL32 regs remain)."""
     client = FakeClient()
     pub = PublishLog()
     exec_ = WriteExecutor(client=client, settings=_settings(), publish=pub)  # type: ignore[arg-type]
     await exec_._handle_one(
         WriteRequest(
-            bms_name="BMS_1", slave_addr=1, object_id="balance_switch", raw_payload="kinda"
+            bms_name="BMS_1", slave_addr=1, object_id="smart_sleep_switch", raw_payload="kinda"
         )
     )
     assert client.last_write_address is None
@@ -226,7 +231,7 @@ async def test_modbus_exception_response_published_as_error() -> None:
     exec_ = WriteExecutor(client=client, settings=_settings(), publish=pub)  # type: ignore[arg-type]
     await exec_._handle_one(
         WriteRequest(
-            bms_name="BMS_1", slave_addr=1, object_id="charging_switch", raw_payload="ON"
+            bms_name="BMS_1", slave_addr=1, object_id="smart_sleep_voltage", raw_payload="3.5"
         )
     )
     assert any("BMS rejected" in json.loads(p)["reason"] for t, p in pub.log if t.endswith("/error"))
@@ -238,7 +243,7 @@ async def test_connection_error_published_as_error() -> None:
     exec_ = WriteExecutor(client=client, settings=_settings(), publish=pub)  # type: ignore[arg-type]
     await exec_._handle_one(
         WriteRequest(
-            bms_name="BMS_1", slave_addr=1, object_id="charging_switch", raw_payload="ON"
+            bms_name="BMS_1", slave_addr=1, object_id="smart_sleep_voltage", raw_payload="3.5"
         )
     )
     assert any("write failed" in json.loads(p)["reason"] for t, p in pub.log if t.endswith("/error"))
@@ -250,7 +255,7 @@ async def test_timeout_published_as_error() -> None:
     exec_ = WriteExecutor(client=client, settings=_settings(), publish=pub)  # type: ignore[arg-type]
     await exec_._handle_one(
         WriteRequest(
-            bms_name="BMS_1", slave_addr=1, object_id="charging_switch", raw_payload="ON"
+            bms_name="BMS_1", slave_addr=1, object_id="smart_sleep_voltage", raw_payload="3.5"
         )
     )
     assert any("write failed" in json.loads(p)["reason"] for t, p in pub.log if t.endswith("/error"))
@@ -390,7 +395,7 @@ async def test_run_drains_queue() -> None:
     queue: asyncio.Queue[WriteRequest] = asyncio.Queue()
     await queue.put(
         WriteRequest(
-            bms_name="BMS_1", slave_addr=1, object_id="charging_switch", raw_payload="ON"
+            bms_name="BMS_1", slave_addr=1, object_id="smart_sleep_voltage", raw_payload="3.5"
         )
     )
     task = asyncio.create_task(exec_.run(queue))
@@ -398,7 +403,7 @@ async def test_run_drains_queue() -> None:
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
-    assert ("BMS_1/control/charging_switch", "ON") in pub.log
+    assert ("BMS_1/control/smart_sleep_voltage", "3.500") in pub.log
 
 
 async def test_run_recovers_from_handler_crash(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -413,7 +418,7 @@ async def test_run_recovers_from_handler_crash(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(WriteExecutor, "_handle_one", boom)
     await queue.put(
         WriteRequest(
-            bms_name="BMS_1", slave_addr=1, object_id="charging_switch", raw_payload="ON"
+            bms_name="BMS_1", slave_addr=1, object_id="smart_sleep_voltage", raw_payload="3.5"
         )
     )
     task = asyncio.create_task(exec_.run(queue))
@@ -425,3 +430,43 @@ async def test_run_recovers_from_handler_crash(monkeypatch: pytest.MonkeyPatch) 
     with pytest.raises(asyncio.CancelledError):
         await task
     assert any("internal error" in json.loads(p)["reason"] for t, p in pub.log if t.endswith("/error"))
+
+
+# -- BOOL32 path with synthetic entity (no real BOOL32 register in the verified table) --
+
+
+async def test_bool32_register_write_round_trip() -> None:
+    """Exercise the BOOL32 encoding path on a synthetic WritableEntity.
+
+    No verified writable currently uses BOOL32, but the encoder/handler support
+    it for future re-additions (e.g. if a firmware variant exposes
+    charging_switch at a known address). Confirms boolean payload parsing and
+    "ON"/"OFF" state echo.
+    """
+    from jkbms2mqtt.entities import Component, WritableEntity
+    from jkbms2mqtt.protocol.jk_settings import Encoding, RegisterDef, WriteTier
+
+    reg = RegisterDef(
+        name="synthetic_bool", address=0x1090, encoding=Encoding.BOOL32,
+        min_value=0, max_value=1, step=1, unit=None,
+        tier=WriteTier.BASIC, description="synthetic BOOL32 reg for tests",
+    )
+    entity = WritableEntity(
+        object_id="synthetic_bool", topic_suffix="control/synthetic_bool",
+        register=reg, component=Component.SWITCH, description="test",
+    )
+
+    client = FakeClient()
+    pub = PublishLog()
+    exec_ = WriteExecutor(client=client, settings=_settings(), publish=pub)  # type: ignore[arg-type]
+    await exec_._handle_register(
+        WriteRequest(
+            bms_name="BMS_1", slave_addr=1,
+            object_id="synthetic_bool", raw_payload="ON",
+        ),
+        entity,
+    )
+    # BOOL32 encodes True as [0, 1].
+    assert client.last_write_address == 0x1090
+    assert client.last_write_values == [0, 1]
+    assert ("BMS_1/control/synthetic_bool", "ON") in pub.log

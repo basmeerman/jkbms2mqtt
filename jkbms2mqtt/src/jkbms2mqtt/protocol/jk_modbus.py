@@ -38,6 +38,10 @@ _OFF_CELL_VOLT_0: Final = 0x00       # uint16 ×16, mV
 _OFF_CELL_PRESENT: Final = 0x20      # uint32 — bitmap, bit N = cell N+1 present
 _OFF_CELL_AVG_V: Final = 0x22        # uint16, mV
 _OFF_CELL_DELTA: Final = 0x23        # uint16, mV
+# Per-cell wire resistance (verified against BMS_1 capture against the app's
+# "Cells Wire Resistance" panel). The previous offset 0x80 in block B turned
+# out to be a mirror region in this firmware.
+_OFF_CELL_RES_0: Final = 0x25        # uint16 ×16, mΩ — per-cell wire resistance
 _OFF_MOS_TEMP: Final = 0x45          # int16  × 0.1 °C
 _OFF_TOTAL_V: Final = 0x48           # uint32, mV
 _OFF_TOTAL_POWER: Final = 0x4A       # uint32, mW (magnitude)
@@ -54,14 +58,20 @@ _OFF_TOTAL_CYCLE_CAP: Final = 0x5A   # uint32, mAh (lifetime accumulated)
 _OFF_SOH_PRECHARGE: Final = 0x5C     # u8 SoH | u8 precharge
 _OFF_RUNTIME: Final = 0x5E           # uint32, seconds
 _OFF_CHARGE_DISCHARGE: Final = 0x60  # u8 charge_enabled | u8 discharge_enabled
-_OFF_HEATING_CURRENT: Final = 0x64   # int16,  mA (PB-series heating element)
-_OFF_HEATING_STATE: Final = 0x65     # u16 — non-zero = heater on
-_OFF_CHARGE_STATUS: Final = 0x6C     # u16 — charge FSM id (stand-by / bulk / abs / float)
-_OFF_CHARGE_STATUS_TIME: Final = 0x6D # u16 — seconds spent in current FSM state
-_OFF_PROBE_3_TEMP: Final = 0x7C      # int16  × 0.1 °C
-_OFF_PROBE_4_TEMP: Final = 0x7D      # int16  × 0.1 °C
-_OFF_PROBE_5_TEMP: Final = 0x7E      # int16  × 0.1 °C
-_OFF_CELL_RES_0: Final = 0x80        # uint16 ×16, mΩ — per-cell internal resistance
+# Heating / charge-FSM fields — SPECULATIVE. Values match a "no heater, no
+# charge" capture (all zero), so the offsets are compatible but unproven.
+# Gated behind the debug_unverified_fields config flag.
+_OFF_HEATING_CURRENT: Final = 0x64   # SPECULATIVE — int16, mA
+_OFF_HEATING_STATE: Final = 0x65     # SPECULATIVE — u16 non-zero = on
+_OFF_CHARGE_STATUS: Final = 0x6C     # SPECULATIVE — actual location unknown; the
+                                     # BMS_1 capture decoded 0 here while the app
+                                     # reported "Bulk".
+_OFF_CHARGE_STATUS_TIME: Final = 0x6D  # SPECULATIVE
+# Probes 3/4/5 live in the block-C window (0x12F0..), not in block B (0x127C..).
+# The previous 0x7C/0x7D/0x7E offsets read zero/mirrored data on real hardware.
+_OFF_PROBE_3_TEMP: Final = 0xF4      # int16  × 0.1 °C — block C
+_OFF_PROBE_4_TEMP: Final = 0xF5      # int16  × 0.1 °C — block C
+_OFF_PROBE_5_TEMP: Final = 0xF6      # int16  × 0.1 °C — block C
 
 MAX_CELLS: Final = 16
 RT_BLOCK_WORDS: Final = 0x110        # total real-time block size we expect

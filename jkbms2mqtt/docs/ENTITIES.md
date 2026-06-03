@@ -10,6 +10,7 @@ display precision, and access state.
 | **Read-only** | Published as an HA sensor / binary sensor. Cannot be changed from HA. |
 | **Read / write (basic)** | Always visible as a status sensor. Becomes a writable `number` / `switch` entity when `enable_basic_writes: true`. |
 | **Read / write (safety)** | Always visible as a status sensor. Becomes a writable `number` / `switch` entity when `enable_safety_writes: true`. |
+| **Unverified** | Modbus register offset has not been confirmed against real hardware. Hidden by default; set `debug_unverified_fields: true` to surface them for experimentation. Marked ⚠ below. |
 
 A write to a parameter whose tier is disabled is rejected with a structured
 error message on `<bms_name>/error`, e.g.:
@@ -45,9 +46,9 @@ commanding a new value posts to `<topic>/set`.
 | `Balance_current` | `balance_current` | A | 3 | Cell-balance current |
 | `Mos_temp` | `mos_temp` | °C | 1 | MOSFET temperature |
 | `Probe_1_temp` … `Probe_5_temp` | `probe_1_temp` … `probe_5_temp` | °C | 1 | External probe temperatures |
-| `Heating_Current` | `heating_current` | A | 3 | Heating-element current (PB-series only) |
-| `charge_status` | `charge_status` | — | — | Charge FSM state (`standby` / `bulk` / `absorption` / `float`) |
-| `charge_status_time` | `charge_status_time` | s | 0 | Seconds spent in current charge FSM state |
+| `Heating_Current` ⚠ | `heating_current` | A | 3 | Heating-element current (PB-series only) — unverified |
+| `charge_status` ⚠ | `charge_status` | — | — | Charge FSM state (`standby` / `bulk` / `absorption` / `float`) — unverified |
+| `charge_status_time` ⚠ | `charge_status_time` | s | 0 | Seconds in current FSM state — unverified |
 | `alarm_bits` | `alarm_bits` | — | 0 | Raw 32-bit alarm bitmap |
 | `alarms` | `alarms` | — | — | Active alarms, comma-separated |
 
@@ -58,7 +59,7 @@ commanding a new value posts to `<topic>/set`.
 | `Switch_Charge` | `switch_charge` | Charge MOSFET reported state |
 | `Switch_Discharge` | `switch_discharge` | Discharge MOSFET reported state |
 | `Switch_Balance` | `switch_balance` | Balance reported state |
-| `Heating` | `heating` | Heating-element on/off (PB-series only) |
+| `Heating` ⚠ | `heating` | Heating-element on/off (PB-series only) — unverified |
 
 ### Cell statistics
 
@@ -90,30 +91,44 @@ commanding a new value posts to `<topic>/set`.
 
 ## Read / write — basic tier
 
-Visible as `number` / `switch` when `enable_basic_writes: true`, otherwise as
-`sensor` / `binary_sensor` showing the current BMS value.
+All addresses verified against `scripts/captures/BMS_1.txt` and the BMS app
+screenshots. Visible as `number` when `enable_basic_writes: true`, as
+`sensor` otherwise (current value still shown).
 
 | Topic suffix | Object id | Unit | Description |
 |---|---|---|---|
-| `control/charging_switch` | `charging_switch` | — | Enable / disable the charge MOSFET |
-| `control/discharging_switch` | `discharging_switch` | — | Enable / disable the discharge MOSFET |
-| `control/balance_switch` | `balance_switch` | — | Enable / disable active cell balancing |
-| `control/balance_trigger_voltage` | `balance_trigger_voltage` | V | Cell-delta voltage that triggers balancing |
-| `control/balance_starting_voltage` | `balance_starting_voltage` | V | Minimum cell voltage before balancing engages |
-| `control/max_balance_current` | `max_balance_current` | A | Maximum balance current (hardware-capped at 10 A) |
-| `control/cell_soc100_voltage` | `cell_soc100_voltage` | V | Cell voltage representing 100 % SoC (display only) |
-| `control/cell_soc0_voltage` | `cell_soc0_voltage` | V | Cell voltage representing 0 % SoC (display only) |
-| `control/cell_request_charge_voltage` | `cell_request_charge_voltage` | V | Cell voltage the BMS requests from the charger |
-| `control/cell_request_float_voltage` | `cell_request_float_voltage` | V | Cell float voltage the BMS requests from the charger |
 | `control/smart_sleep_voltage` | `smart_sleep_voltage` | V | Cell voltage below which the BMS enters smart sleep |
-| `control/disable_pcl_module_switch` | `disable_pcl_module_switch` | — | Disable the pre-charge limit module |
-| `control/smart_sleep_switch` | `smart_sleep_switch` | — | Enable smart-sleep behaviour |
-| `control/timed_stored_data_switch` | `timed_stored_data_switch` | — | Enable periodic data storage in BMS RAM |
+| `control/balance_trigger_voltage` | `balance_trigger_voltage` | V | Cell-delta voltage that triggers balancing |
+| `control/cell_soc100_voltage` | `cell_soc100_voltage` | V | Cell voltage representing 100 % SoC |
+| `control/cell_soc0_voltage` | `cell_soc0_voltage` | V | Cell voltage representing 0 % SoC |
+| `control/cell_request_charge_voltage` | `cell_request_charge_voltage` | V | Cell voltage requested from charger |
+| `control/cell_request_float_voltage` | `cell_request_float_voltage` | V | Cell float voltage requested |
+| `control/max_balance_current` | `max_balance_current` | A | Maximum balance current (hardware-capped at 10 A) |
+| `control/balance_starting_voltage` | `balance_starting_voltage` | V | Minimum cell voltage before balancing engages |
+
+The `charging_switch` / `discharging_switch` / `balance_switch` entities from
+earlier versions of the bridge are **not present**: no verified Modbus address
+exists for them on the V1.0/V1.1 protocol. Read-only state for those flags is
+still available via the `Switch_Charge` / `Switch_Discharge` / `Switch_Balance`
+binary sensors in the live block.
+
+### Unverified packed-bit toggles (basic, hidden by default)
+
+The packed-bit register at `0x1114` holds several boolean flags but the bit
+positions are not yet confirmed. Marked `verified=False`; visible only when
+`debug_unverified_fields: true`.
+
+| Topic suffix | Object id | Description |
+|---|---|---|
+| `control/disable_pcl_module_switch` ⚠ | `disable_pcl_module_switch` | Disable pre-charge limit module — unverified |
+| `control/smart_sleep_switch` ⚠ | `smart_sleep_switch` | Enable smart-sleep behaviour — unverified |
+| `control/timed_stored_data_switch` ⚠ | `timed_stored_data_switch` | Enable periodic data storage in BMS RAM — unverified |
 
 ## Read / write — safety tier
 
-Visible as `number` / `switch` when `enable_safety_writes: true`, otherwise as
-`sensor` / `binary_sensor` showing the current BMS value.
+All addresses and encodings verified against `scripts/captures/BMS_1.txt` and
+the BMS app screenshots. Visible as `number` when `enable_safety_writes: true`,
+as `sensor` otherwise.
 
 > **Warning** — wrong values here can damage cells, cause overcurrent, or pose
 > a fire risk. Do not enable this tier unless you understand the consequences.
@@ -129,15 +144,20 @@ Visible as `number` / `switch` when `enable_safety_writes: true`, otherwise as
 | `control/charge_overcurrent_protection_delay` | `charge_overcurrent_protection_delay` | s | Charge OCP trip delay |
 | `control/charge_overcurrent_protection_recovery_time` | `charge_overcurrent_protection_recovery_time` | s | Charge OCP recovery time |
 | `control/max_discharge_current` | `max_discharge_current` | A | Maximum discharge current |
-| `control/charge_overtemperature_protection` | `charge_overtemperature_protection` | °C | Charge OTP threshold |
-| `control/charge_overtemperature_protection_recovery` | `charge_overtemperature_protection_recovery` | °C | Charge OTP recovery |
+| `control/discharge_overcurrent_protection_delay` | `discharge_overcurrent_protection_delay` | s | Discharge OCP trip delay |
+| `control/discharge_overcurrent_protection_recovery_time` | `discharge_overcurrent_protection_recovery_time` | s | Discharge OCP recovery time |
+| `control/short_circuit_protection_recovery_time` | `short_circuit_protection_recovery_time` | s | SCP recovery time |
 | `control/discharge_overtemperature_protection` | `discharge_overtemperature_protection` | °C | Discharge OTP threshold |
 | `control/discharge_overtemperature_protection_recovery` | `discharge_overtemperature_protection_recovery` | °C | Discharge OTP recovery |
+| `control/charge_overtemperature_protection` | `charge_overtemperature_protection` | °C | Charge OTP threshold |
+| `control/charge_overtemperature_protection_recovery` | `charge_overtemperature_protection_recovery` | °C | Charge OTP recovery |
 | `control/charge_undertemperature_protection` | `charge_undertemperature_protection` | °C | Charge UTP threshold (lithium-plating risk) |
 | `control/charge_undertemperature_protection_recovery` | `charge_undertemperature_protection_recovery` | °C | Charge UTP recovery |
 | `control/power_tube_overtemperature_protection` | `power_tube_overtemperature_protection` | °C | MOSFET OTP threshold |
 | `control/power_tube_overtemperature_protection_recovery` | `power_tube_overtemperature_protection_recovery` | °C | MOSFET OTP recovery |
 | `control/cell_count` | `cell_count` | — | Number of cells in the pack |
+| `control/pack_capacity_setting` | `pack_capacity_setting` | Ah | Configured pack capacity (drives SoC scaling) |
+| `control/short_circuit_protection_delay_us` | `short_circuit_protection_delay_us` | µs | Short-circuit protection trip delay |
 
 ## Service topics
 
