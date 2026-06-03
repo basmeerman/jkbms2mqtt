@@ -50,12 +50,18 @@ _OFF_BALANCE_STATE_SOC: Final = 0x53 # u8 balance_state | u8 SOC %
 _OFF_REMAINING_CAP: Final = 0x54     # int32,  mAh
 _OFF_NOMINAL_CAP: Final = 0x56       # uint32, mAh
 _OFF_CYCLE_COUNT: Final = 0x58       # uint32
+_OFF_TOTAL_CYCLE_CAP: Final = 0x5A   # uint32, mAh (lifetime accumulated)
 _OFF_SOH_PRECHARGE: Final = 0x5C     # u8 SoH | u8 precharge
 _OFF_RUNTIME: Final = 0x5E           # uint32, seconds
 _OFF_CHARGE_DISCHARGE: Final = 0x60  # u8 charge_enabled | u8 discharge_enabled
+_OFF_HEATING_CURRENT: Final = 0x64   # int16,  mA (PB-series heating element)
+_OFF_HEATING_STATE: Final = 0x65     # u16 — non-zero = heater on
+_OFF_CHARGE_STATUS: Final = 0x6C     # u16 — charge FSM id (stand-by / bulk / abs / float)
+_OFF_CHARGE_STATUS_TIME: Final = 0x6D # u16 — seconds spent in current FSM state
 _OFF_PROBE_3_TEMP: Final = 0x7C      # int16  × 0.1 °C
 _OFF_PROBE_4_TEMP: Final = 0x7D      # int16  × 0.1 °C
 _OFF_PROBE_5_TEMP: Final = 0x7E      # int16  × 0.1 °C
+_OFF_CELL_RES_0: Final = 0x80        # uint16 ×16, mΩ — per-cell internal resistance
 
 MAX_CELLS: Final = 16
 RT_BLOCK_WORDS: Final = 0x110        # total real-time block size we expect
@@ -67,7 +73,16 @@ INFO_BLOCK_WORDS: Final = 0x50       # static info block size
 _OFF_MODEL: Final = 0x00            # ASCII 16 bytes (8 words)
 _OFF_HW_VERSION: Final = 0x08       # ASCII  8 bytes (4 words)
 _OFF_SW_VERSION: Final = 0x0C       # ASCII  8 bytes (4 words)
+_OFF_CELL_TYPE: Final = 0x18        # u16 — cell-chemistry code (LFP / NMC / LTO / …)
 _OFF_SERIAL: Final = 0x28           # ASCII 16 bytes (8 words)
+
+
+# Cell-chemistry codes as published by the BMS info block.
+CELL_TYPES: Final = {
+    0: "LFP",
+    1: "NMC",
+    2: "LTO",
+}
 
 
 # -- Alarm bit names (from the V1.0 spec) --------------------------------------------
@@ -98,6 +113,16 @@ ALARM_NAMES: Final = (
 )
 
 
+# Charge-FSM state codes as published in the real-time block.
+CHARGE_STATUS_NAMES: Final = {
+    0: "standby",
+    1: "bulk",
+    2: "absorption",
+    3: "float",
+    4: "request_full_charge",
+}
+
+
 # -- Decoded dataclasses --------------------------------------------------------------
 
 
@@ -110,6 +135,7 @@ class JkRealtime:
     """
 
     cell_voltages_v: tuple[float, ...]
+    cell_resistances_ohm: tuple[float, ...]   # per-cell internal resistance, populated cells only
     cell_voltage_avg_v: float
     cell_voltage_delta_v: float
     cell_voltage_max_v: float
@@ -137,13 +163,22 @@ class JkRealtime:
     remaining_capacity_ah: float
     nominal_capacity_ah: float
     cycle_count: int
+    total_cycle_capacity_ah: float
     runtime_s: int
 
     charge_enabled: bool
     discharge_enabled: bool
 
+    heating_active: bool
+    heating_current_a: float
+
+    charge_status_id: int
+    charge_status: str                 # decoded name, or empty if unknown id
+    charge_status_time_s: int
+
     alarm_bits: int
     alarms: tuple[str, ...]
+    alarms_csv: str                    # alarms joined with ',' — friendlier for HA dashboards
 
 
 @dataclass(frozen=True, slots=True)
@@ -154,6 +189,7 @@ class JkStaticInfo:
     hw_version: str
     sw_version: str
     serial_number: str
+    cell_type: str                    # cell-chemistry name (LFP / NMC / LTO / id-N)
 
 
 # -- Primitive helpers ----------------------------------------------------------------
@@ -219,10 +255,13 @@ def decode_realtime(regs: list[int]) -> JkRealtime:
     # phantom 0 V cells. Bit N of the bitmap = cell (N+1) is enabled.
     present = _u32(regs, _OFF_CELL_PRESENT)
     cells: list[float] = []
+    resistances: list[float] = []
     for i in range(MAX_CELLS):
         if present & (1 << i):
             mv = _u16(regs, _OFF_CELL_VOLT_0 + i)
             cells.append(mv / 1000.0)
+            mohm = _u16(regs, _OFF_CELL_RES_0 + i)
+            resistances.append(mohm / 1000.0)
 
     cell_count = len(cells)
     if cells:
@@ -261,8 +300,12 @@ def decode_realtime(regs: list[int]) -> JkRealtime:
         if alarm_bits & (1 << i)
     )
 
+    charge_status_id = _u16(regs, _OFF_CHARGE_STATUS)
+    charge_status_name = CHARGE_STATUS_NAMES.get(charge_status_id, "")
+
     return JkRealtime(
         cell_voltages_v=tuple(cells),
+        cell_resistances_ohm=tuple(resistances),
         cell_voltage_avg_v=cell_avg_v,
         cell_voltage_delta_v=cell_delta_v,
         cell_voltage_max_v=cell_max_v,
@@ -286,11 +329,18 @@ def decode_realtime(regs: list[int]) -> JkRealtime:
         remaining_capacity_ah=_i32(regs, _OFF_REMAINING_CAP) / 1000.0,
         nominal_capacity_ah=_u32(regs, _OFF_NOMINAL_CAP) / 1000.0,
         cycle_count=_u32(regs, _OFF_CYCLE_COUNT),
+        total_cycle_capacity_ah=_u32(regs, _OFF_TOTAL_CYCLE_CAP) / 1000.0,
         runtime_s=_u32(regs, _OFF_RUNTIME),
         charge_enabled=charge_enabled,
         discharge_enabled=discharge_enabled,
+        heating_active=_u16(regs, _OFF_HEATING_STATE) != 0,
+        heating_current_a=_i16(regs, _OFF_HEATING_CURRENT) / 1000.0,
+        charge_status_id=charge_status_id,
+        charge_status=charge_status_name,
+        charge_status_time_s=_u16(regs, _OFF_CHARGE_STATUS_TIME),
         alarm_bits=alarm_bits,
         alarms=alarms,
+        alarms_csv=",".join(alarms),
     )
 
 
@@ -300,11 +350,14 @@ def decode_static_info(regs: list[int]) -> JkStaticInfo:
         raise ValueError(
             f"regs list too short: got {len(regs)} words, need {INFO_BLOCK_WORDS}"
         )
+    type_id = _u16(regs, _OFF_CELL_TYPE)
+    cell_type = CELL_TYPES.get(type_id, f"id-{type_id}")
     return JkStaticInfo(
         model=_ascii(regs, _OFF_MODEL, 16),
         hw_version=_ascii(regs, _OFF_HW_VERSION, 8),
         sw_version=_ascii(regs, _OFF_SW_VERSION, 8),
         serial_number=_ascii(regs, _OFF_SERIAL, 16),
+        cell_type=cell_type,
     )
 
 
