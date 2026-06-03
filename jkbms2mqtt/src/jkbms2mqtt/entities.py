@@ -268,6 +268,72 @@ LIVE_SENSORS: Final[tuple[ReadOnlyEntity, ...]] = (
         decimals=0,
         description="Total runtime since BMS power-on.",
     ),
+    ReadOnlyEntity(
+        object_id="total_cycle_capacity_ah",
+        topic_suffix="Cycle_Capacity_Ah",
+        source_field="total_cycle_capacity_ah",
+        component=Component.SENSOR,
+        device_class=None,
+        state_class="total_increasing",
+        unit_of_measurement="Ah",
+        decimals=2,
+        description="Lifetime accumulated charge throughput.",
+    ),
+    ReadOnlyEntity(
+        object_id="heating_current",
+        topic_suffix="Heating_Current",
+        source_field="heating_current_a",
+        component=Component.SENSOR,
+        device_class="current",
+        state_class="measurement",
+        unit_of_measurement="A",
+        decimals=3,
+        description="Current drawn by the heating element (PB-series only).",
+    ),
+    ReadOnlyEntity(
+        object_id="charge_status",
+        topic_suffix="charge_status",
+        source_field="charge_status",
+        component=Component.SENSOR,
+        device_class=None,
+        state_class=None,
+        unit_of_measurement=None,
+        decimals=None,
+        description="Charge FSM state (standby / bulk / absorption / float).",
+    ),
+    ReadOnlyEntity(
+        object_id="charge_status_time",
+        topic_suffix="charge_status_time",
+        source_field="charge_status_time_s",
+        component=Component.SENSOR,
+        device_class="duration",
+        state_class="measurement",
+        unit_of_measurement="s",
+        decimals=0,
+        description="Seconds spent in the current charge FSM state.",
+    ),
+    ReadOnlyEntity(
+        object_id="alarm_bits",
+        topic_suffix="alarm_bits",
+        source_field="alarm_bits",
+        component=Component.SENSOR,
+        device_class=None,
+        state_class=None,
+        unit_of_measurement=None,
+        decimals=0,
+        description="Raw alarm bitmap (32-bit).",
+    ),
+    ReadOnlyEntity(
+        object_id="alarms",
+        topic_suffix="alarms",
+        source_field="alarms_csv",
+        component=Component.SENSOR,
+        device_class=None,
+        state_class=None,
+        unit_of_measurement=None,
+        decimals=None,
+        description="Comma-separated list of active alarms.",
+    ),
 )
 
 
@@ -306,6 +372,17 @@ LIVE_BINARY_SENSORS: Final[tuple[ReadOnlyEntity, ...]] = (
         unit_of_measurement=None,
         decimals=None,
         description="Balance state (reported).",
+    ),
+    ReadOnlyEntity(
+        object_id="heating",
+        topic_suffix="Heating",
+        source_field="heating_active",
+        component=Component.BINARY_SENSOR,
+        device_class="heat",
+        state_class=None,
+        unit_of_measurement=None,
+        decimals=None,
+        description="Heating-element state (PB-series only).",
     ),
 )
 
@@ -399,7 +476,7 @@ CELL_STATS_SENSORS: Final[tuple[ReadOnlyEntity, ...]] = (
 
 
 def expand_cell_entities(cell_count: int) -> tuple[ReadOnlyEntity, ...]:
-    """Return one voltage entity per populated cell."""
+    """Return one voltage entity and one resistance entity per populated cell."""
     out: list[ReadOnlyEntity] = []
     for n in range(1, cell_count + 1):
         out.append(
@@ -413,6 +490,20 @@ def expand_cell_entities(cell_count: int) -> tuple[ReadOnlyEntity, ...]:
                 unit_of_measurement="V",
                 decimals=3,
                 description=f"Cell {n} voltage.",
+            )
+        )
+    for n in range(1, cell_count + 1):
+        out.append(
+            ReadOnlyEntity(
+                object_id=f"cell_{n}_ohm",
+                topic_suffix=f"Cell_{n}_ohm",
+                source_field=f"cell_resistances_ohm[{n - 1}]",
+                component=Component.SENSOR,
+                device_class=None,
+                state_class="measurement",
+                unit_of_measurement="Ω",
+                decimals=3,
+                description=f"Cell {n} internal resistance.",
             )
         )
     return tuple(out)
@@ -464,6 +555,17 @@ FIXED_SENSORS: Final[tuple[ReadOnlyEntity, ...]] = (
         unit_of_measurement=None,
         decimals=None,
         description="BMS serial number.",
+    ),
+    ReadOnlyEntity(
+        object_id="cell_type",
+        topic_suffix="Cell_Type",
+        source_field="cell_type",
+        component=Component.SENSOR,
+        device_class=None,
+        state_class=None,
+        unit_of_measurement=None,
+        decimals=None,
+        description="Cell chemistry (LFP / NMC / LTO).",
     ),
 )
 

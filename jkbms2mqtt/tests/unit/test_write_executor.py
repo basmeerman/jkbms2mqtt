@@ -166,7 +166,7 @@ async def test_basic_tier_disabled_refuses() -> None:
     )
     assert client.last_write_address is None
     assert any(
-        t == "BMS_1/error" and "tier basic" in json.loads(p)["reason"]
+        t == "BMS_1/error" and "enable_basic_writes" in json.loads(p)["reason"]
         for t, p in pub.log
     )
 

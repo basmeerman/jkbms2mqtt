@@ -214,3 +214,83 @@ def test_packed_bit_def_dataclass_shape() -> None:
     )
     assert b.name == "x"
     assert b.bit_mask == 1
+
+
+class TestDecodeRegisterValue:
+    """``decode_register_value`` reverses ``encode_value_to_words`` exactly."""
+
+    @pytest.fixture()
+    def regs(self) -> list[int]:
+        from jkbms2mqtt.protocol.jk_settings import SETTINGS_BLOCK_WORDS
+        return [0] * SETTINGS_BLOCK_WORDS
+
+    def _place(self, regs: list[int], reg: RegisterDef, value: float | bool) -> None:
+        from jkbms2mqtt.protocol.jk_settings import SETTINGS_BLOCK_BASE
+        words = encode_value_to_words(reg, value)
+        off = reg.address - SETTINGS_BLOCK_BASE
+        regs[off] = words[0]
+        regs[off + 1] = words[1]
+
+    def test_u32_raw_roundtrip(self, regs: list[int]) -> None:
+        from jkbms2mqtt.protocol.jk_settings import decode_register_value
+        r = next(x for x in SAFETY_REGISTERS if x.encoding is Encoding.U32_RAW)
+        self._place(regs, r, 30)
+        assert decode_register_value(r, regs) == pytest.approx(30.0)
+
+    def test_u32_milli_roundtrip(self, regs: list[int]) -> None:
+        from jkbms2mqtt.protocol.jk_settings import decode_register_value
+        r = next(x for x in BASIC_REGISTERS if x.encoding is Encoding.U32_MILLI)
+        self._place(regs, r, 0.300)
+        assert decode_register_value(r, regs) == pytest.approx(0.300, abs=1e-3)
+
+    def test_u32_deci_roundtrip(self, regs: list[int]) -> None:
+        from jkbms2mqtt.protocol.jk_settings import decode_register_value
+        r = next(x for x in SAFETY_REGISTERS if x.encoding is Encoding.U32_DECI)
+        self._place(regs, r, 50.0)
+        assert decode_register_value(r, regs) == pytest.approx(50.0)
+
+    def test_i32_deci_negative_roundtrip(self, regs: list[int]) -> None:
+        from jkbms2mqtt.protocol.jk_settings import decode_register_value
+        r = next(x for x in SAFETY_REGISTERS if x.encoding is Encoding.I32_DECI)
+        self._place(regs, r, -20.0)
+        assert decode_register_value(r, regs) == pytest.approx(-20.0)
+
+    def test_bool32_roundtrip_on(self, regs: list[int]) -> None:
+        from jkbms2mqtt.protocol.jk_settings import decode_register_value
+        r = next(x for x in BASIC_REGISTERS if x.encoding is Encoding.BOOL32)
+        self._place(regs, r, True)
+        assert decode_register_value(r, regs) is True
+
+    def test_bool32_roundtrip_off(self, regs: list[int]) -> None:
+        from jkbms2mqtt.protocol.jk_settings import decode_register_value
+        r = next(x for x in BASIC_REGISTERS if x.encoding is Encoding.BOOL32)
+        self._place(regs, r, False)
+        assert decode_register_value(r, regs) is False
+
+    def test_out_of_block_register_rejected(self) -> None:
+        from jkbms2mqtt.protocol.jk_settings import decode_register_value
+        r = RegisterDef(
+            name="bogus", address=0x9000, encoding=Encoding.U32_RAW,
+            min_value=0, max_value=1, step=1, unit=None,
+            tier=WriteTier.BASIC, description="off-block",
+        )
+        with pytest.raises(EncodeError, match="outside settings block"):
+            decode_register_value(r, [0] * 4)
+
+
+class TestDecodePackedBit:
+    def test_bit_set(self) -> None:
+        from jkbms2mqtt.protocol.jk_settings import decode_packed_bit_value
+        bit = PACKED_BITS[0]
+        assert decode_packed_bit_value(bit, bit.bit_mask) is True
+
+    def test_bit_unset(self) -> None:
+        from jkbms2mqtt.protocol.jk_settings import decode_packed_bit_value
+        bit = PACKED_BITS[0]
+        assert decode_packed_bit_value(bit, 0x0000) is False
+
+    def test_other_bits_ignored(self) -> None:
+        from jkbms2mqtt.protocol.jk_settings import decode_packed_bit_value
+        bit = PACKED_BITS[0]
+        # All other bits set, but mask bit cleared.
+        assert decode_packed_bit_value(bit, 0xFFFF ^ bit.bit_mask) is False

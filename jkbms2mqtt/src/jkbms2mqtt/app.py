@@ -86,12 +86,14 @@ async def run(settings: Settings) -> None:  # pragma: no cover - top-level glue
             client=client, settings=settings, publish=publish_write_output
         )
 
-        # Subscriptions
-        if settings.enable_basic_writes or settings.enable_safety_writes:
-            lookup = writable_by_command_topic_suffix()
-            for r in runners:
-                for suffix in lookup:
-                    await mqtt.subscribe(f"{r.bms_name}/{suffix}", qos=1)
+        # Always subscribe to every /set topic. The write executor enforces tier
+        # gating and publishes a structured error to <bms>/error if a user posts
+        # to a parameter whose tier is disabled by config — so the user gets
+        # immediate, visible feedback instead of a silent drop.
+        lookup = writable_by_command_topic_suffix()
+        for r in runners:
+            for suffix in lookup:
+                await mqtt.subscribe(f"{r.bms_name}/{suffix}", qos=1)
 
         # Signal handling
         loop = asyncio.get_event_loop()

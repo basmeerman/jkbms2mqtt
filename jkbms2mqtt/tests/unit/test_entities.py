@@ -13,7 +13,6 @@ from jkbms2mqtt.entities import (
     LIVE_SENSORS,
     PACKED_BIT_ENTITIES,
     WRITABLE_ENTITIES,
-    Component,
     ReadOnlyEntity,
     all_read_only_entities,
     expand_cell_entities,
@@ -81,10 +80,13 @@ class TestNamingCompat:
 class TestCellExpansion:
     def test_cells_1_through_n(self) -> None:
         cells = expand_cell_entities(8)
-        assert len(cells) == 8
-        assert cells[0].object_id == "cell_1_volt"
+        # N voltages + N resistances.
+        assert len(cells) == 16
+        ids = [c.object_id for c in cells]
+        assert ids[:8] == [f"cell_{n}_volt" for n in range(1, 9)]
+        assert ids[8:] == [f"cell_{n}_ohm" for n in range(1, 9)]
         assert cells[0].topic_suffix == "Cell_1_volt"
-        assert cells[-1].object_id == "cell_8_volt"
+        assert cells[-1].topic_suffix == "Cell_8_ohm"
 
     def test_zero_cells(self) -> None:
         cells = expand_cell_entities(0)
@@ -96,18 +98,23 @@ class TestCellExpansion:
         assert "cell_1_volt" in cell_ids
         assert "cell_4_volt" in cell_ids
         assert "cell_5_volt" not in cell_ids
+        assert "cell_1_ohm" in cell_ids
+        assert "cell_4_ohm" in cell_ids
+        assert "cell_5_ohm" not in cell_ids
 
 
 class TestWritables:
-    def test_switch_writables_are_switches(self) -> None:
+    def test_switch_writables_carry_a_bool_encoding(self) -> None:
+        from jkbms2mqtt.protocol.jk_settings import Encoding
         by_id = {w.object_id: w for w in WRITABLE_ENTITIES}
-        assert by_id["charging_switch"].component is Component.SWITCH
-        assert by_id["balance_switch"].component is Component.SWITCH
+        assert by_id["charging_switch"].register.encoding is Encoding.BOOL32
+        assert by_id["balance_switch"].register.encoding is Encoding.BOOL32
 
-    def test_number_writables_are_numbers(self) -> None:
+    def test_number_writables_carry_a_numeric_encoding(self) -> None:
+        from jkbms2mqtt.protocol.jk_settings import Encoding
         by_id = {w.object_id: w for w in WRITABLE_ENTITIES}
-        assert by_id["max_charge_current"].component is Component.NUMBER
-        assert by_id["balance_trigger_voltage"].component is Component.NUMBER
+        assert by_id["max_charge_current"].register.encoding is Encoding.U32_DECI
+        assert by_id["balance_trigger_voltage"].register.encoding is Encoding.U32_MILLI
 
     def test_writables_use_control_prefix(self) -> None:
         for w in WRITABLE_ENTITIES:

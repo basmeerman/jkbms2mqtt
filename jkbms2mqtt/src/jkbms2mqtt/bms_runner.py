@@ -29,6 +29,7 @@ from jkbms2mqtt.mqtt import (
     build_discovery_messages,
     render,
     state_messages_from_live,
+    state_messages_from_settings,
     state_messages_from_static,
 )
 from jkbms2mqtt.protocol.jk_modbus import (
@@ -38,6 +39,17 @@ from jkbms2mqtt.protocol.jk_modbus import (
     RT_BLOCK_WORDS,
     decode_realtime,
     decode_static_info,
+)
+from jkbms2mqtt.protocol.jk_settings import (
+    BASIC_REGISTERS,
+    PACKED_BIT_REGISTER,
+    PACKED_BITS,
+    SAFETY_REGISTERS,
+    SETTINGS_BLOCK_BASE,
+    SETTINGS_BLOCK_WORDS,
+    EncodeError,
+    decode_packed_bit_value,
+    decode_register_value,
 )
 
 if TYPE_CHECKING:
@@ -108,6 +120,7 @@ class BmsRunner:
         for topic, payload in state_messages_from_live(live, self.bms_name):
             await self.publish(topic, payload, 0, False)
         await self._poll_static_info_if_needed()
+        await self._poll_settings()
 
     async def _read_realtime_blocks(self) -> list[int] | None:
         """Read blocks A/B/C; return a stitched buffer or None on critical failure."""
@@ -200,9 +213,62 @@ class BmsRunner:
             return
         info = decode_static_info(resp.registers)
         logger.info(
-            "BMS %d: model=%r hw=%r sw=%r serial=%r",
-            self.slave_addr, info.model, info.hw_version, info.sw_version, info.serial_number,
+            "BMS %d: model=%r hw=%r sw=%r serial=%r cell_type=%r",
+            self.slave_addr,
+            info.model, info.hw_version, info.sw_version, info.serial_number, info.cell_type,
         )
         for topic, payload in state_messages_from_static(info, self.bms_name):
             await self.publish(topic, payload, 0, True)
         self._static_info_published = True
+
+    async def _poll_settings(self) -> None:
+        """Read the writable-settings block + packed-bit register, publish state.
+
+        Best-effort: any failure here is logged at debug and the cycle moves
+        on. Settings rarely change, so a stale value is fine. Writing always
+        updates the topic immediately via the write executor.
+        """
+        try:
+            resp = await self.client.read_holding_registers(
+                address=SETTINGS_BLOCK_BASE,
+                count=SETTINGS_BLOCK_WORDS,
+                device_id=self.slave_addr,
+            )
+        except (TimeoutError, ConnectionError) as exc:
+            logger.debug("BMS %d: settings read failed: %s", self.slave_addr, exc)
+            return
+        if resp.isError():
+            logger.debug(
+                "BMS %d: settings returned Modbus error: %s", self.slave_addr, resp
+            )
+            return
+        regs = list(resp.registers)
+        register_values: dict[object, float | bool] = {}
+        for r in (*BASIC_REGISTERS, *SAFETY_REGISTERS):
+            try:
+                register_values[r] = decode_register_value(r, regs)
+            except EncodeError as exc:  # pragma: no cover - defensive
+                logger.debug("BMS %d: cannot decode %s: %s", self.slave_addr, r.name, exc)
+
+        # Packed-bit register lives outside the contiguous settings block.
+        packed_values: dict[object, bool] = {}
+        try:
+            packed_resp = await self.client.read_holding_registers(
+                address=PACKED_BIT_REGISTER, count=1, device_id=self.slave_addr,
+            )
+        except (TimeoutError, ConnectionError) as exc:
+            logger.debug(
+                "BMS %d: packed-bit register read failed: %s", self.slave_addr, exc
+            )
+        else:
+            if not packed_resp.isError() and packed_resp.registers:
+                raw = packed_resp.registers[0]
+                for bit in PACKED_BITS:
+                    packed_values[bit] = decode_packed_bit_value(bit, raw)
+
+        for topic, payload in state_messages_from_settings(
+            register_values=register_values,  # type: ignore[arg-type]
+            packed_values=packed_values,       # type: ignore[arg-type]
+            bms_name=self.bms_name,
+        ):
+            await self.publish(topic, payload, 0, True)
