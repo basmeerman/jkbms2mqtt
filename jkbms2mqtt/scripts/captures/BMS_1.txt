@@ -1,0 +1,151 @@
+# jkbms2mqtt register dump — REGRESSION FIXTURE
+# gateway = 192.168.4.156:502, slave_id = 1
+# captured 2026-06-03
+# BMS model = JK_PB2A16S20P, fw 15.41, hw 15A
+# Anchor values from the BMS app, see /docs/*.jpeg in the repo root.
+
+==============================================================================
+REAL-TIME BLOCKS (base 0x1200)
+==============================================================================
+
+# RT_A @ 0x1200  (count=120)
+  0x1200:  0c6f 0c6f 0c6f 0c6f 0c6f 0c6f 0c6f 0c6f
+  0x1208:  0c6f 0c6f 0c6f 0c6f 0c6f 0c6f 0c6f 0c6f
+  0x1210:  0000 0000 0000 0000 0000 0000 0000 0000
+  0x1218:  0000 0000 0000 0000 0000 0000 0000 0000
+  0x1220:  0000 ffff 0c6f 0000 0000 003e 0042 004c
+  0x1228:  004e 005c 0063 0072 0078 0066 0054 005b
+  0x1230:  004c 0049 0046 0043 003b 0000 0000 0000
+  0x1238:  0000 0000 0000 0000 0000 0000 0000 0000
+  0x1240:  0000 0000 0000 0000 0000 00e7 0000 0000
+  0x1248:  0000 c6eb 0000 0000 0000 0000 00d8 00d8
+  0x1250:  0000 0000 0000 003b 0002 cee9 0004 ca90
+  0x1258:  0000 0000 0000 6138 6400 0000 00ba a7b0
+  0x1260:  0101 0000 0000 0000 0000 0000 0000 0000
+  0x1268:  ff00 0100 0000 03bd 0000 0000 403f 2760
+  0x1270:  0000 0000 13e4 0000 0001 0101 0006 0000
+
+# RT_B @ 0x1278  (count=50)
+  0x1278:  0000 0000 0000 0000 0000 0000 0000 0000
+  0x1280:  0000 00e7 0000 0000 0000 c6eb 0000 0000
+  0x1288:  0000 0000 00d8 00d8 0000 0000 0000 003b
+  0x1290:  0002 cee9 0004 ca90 0000 0000 0000 6138
+  0x1298:  6400 0000 00ba a7b0 0101 0000 0000 0000
+  0x12a0:  0000 0000 0000 0000 ff00 0100 0000 03bd
+  0x12a8:  0000 0000
+
+# RT_C @ 0x12f0  (count=16)
+  0x12f0:  0082 6b20 0000 0000 00e7 00d8 00da 03c8
+  0x12f8:  0c14 a6fc 0000 0024 0001 5180 0000 0300
+
+==============================================================================
+SETTINGS BLOCKS (base 0x1000)
+==============================================================================
+
+# SETTINGS_1 @ 0x1000  (count=100)
+  0x1000:  0000 0dac 0000 0a14 0000 0a3c 0000 0e42
+  0x1008:  0000 0dfc 0000 000a 0000 0e06 0000 0a28
+  0x1010:  0000 0e10 0000 0dac 0000 09c4 0000 9c40
+  0x1018:  0000 0003 0000 003c 0003 0d40 0000 012c
+  0x1020:  0000 003c 0000 0005 0000 07d0 0000 02bc
+  0x1028:  0000 0258 0000 02bc 0000 0258 0000 0014
+  0x1030:  0000 0046 0000 0320 0000 02bc 0000 0010
+  0x1038:  0000 0001 0000 0001 0000 0001 0004 ca90
+  0x1040:  0000 05dc 0000 0bb8 0000 0000 0000 0000
+
+# SETTINGS_2 @ 0x1064  (count=34)
+  0x1064:  0000 0320 0000 02bc 0000 0010 0000 0001
+  0x106c:  0000 0001 0000 0001 0004 ca90 0000 05dc
+  0x1074:  0000 0bb8 0000 0000 0000 0000 0000 0000
+
+==============================================================================
+PACKED BIT REGISTER 0x1114
+==============================================================================
+  0x1114:  3200
+
+==============================================================================
+STATIC INFO BLOCK @ 0x1400
+==============================================================================
+
+# INFO @ 0x1400  (count=80)
+  0x1400:  4a4b 5f50 4232 4131 3653 3230 5000 0000    |JK_PB2A16S20P...|
+  0x1408:  3135 4100 0000 0000 3135 2e34 3100 0000    |15A.....15.41...|
+  0x1410:  00ba a734 0000 0009 3530 3331 3434 3930    |...4....50314490|
+  0x1418:  3239 3500 5000 0000 3132 3334 0000 0000    |295.P...1234....|
+  0x1420:  0000 0000 0000 0000 3236 3031 3130 0000    |........260110..|
+  0x1428:  3530 3331 3434 3930 3239 3500 3030 3000    |50314490295.000.|
+  0x1430:  4a4b 2d42 4d53 0000 0000 0000 0000 0000    |JK-BMS..........|
+  0x1438:  4c5a 6574 334e 7556 344d 5872 0000 0000    |LZet3NuV4MXr....|
+  0x1440:  4a4b 2d42 4d53 0000 0000 0000 0000 0000    |JK-BMS..........|
+  0x1448:  ffff ffff 8fe9 9d03 0000 0000 901f 0000
+
+==============================================================================
+ANCHOR VALUES (from BMS app screenshots in /docs/*.jpeg)
+==============================================================================
+  Total voltage         = 50.92 V
+  Pack current          = 0.00 A
+  SoC                   = 59 %
+  SoH                   = 100 %
+  Remaining capacity    = 184.0 Ah
+  Battery capacity      = 314.0 Ah
+  Cycle count           = 0
+  Cycle capacity        = 24.9 Ah
+  Runtime               = 141d 13h 59m 27s
+  MOS temp              = 23.1 °C
+  Probe T1              = 21.6 °C
+  Probe T2              = 21.5 °C
+  Probe T4              = 21.6 °C
+  Probe T5              = 21.8 °C
+  Heat current          = 0.000 A
+  Heating status        = OFF
+  Charge status         = Bulk     <-- NOT standby
+  Charge status time    = 0 s
+  Cell type             = LFP
+  Cell voltages         = all 16 cells at 3.183 V
+  Cell wire resistances = 0.062, 0.066, 0.076, 0.078, 0.092, 0.099,
+                          0.114, 0.120, 0.102, 0.084, 0.091, 0.076,
+                          0.073, 0.070, 0.067, 0.059   (Ω)
+
+  -- Writable settings (Settings tab in BMS app) --
+  Vol. Smart Sleep      = 3.500 V
+  Cell UVP              = 2.580 V
+  Cell UVPR             = 2.620 V
+  Cell OVP              = 3.650 V
+  Cell OVPR             = 3.580 V
+  SOC-100% Volt.        = 3.590 V
+  SOC-0% Volt.          = 2.600 V
+  Vol. Cell RCV         = 3.600 V
+  Vol. Cell RFV         = 3.500 V
+  Power Off Vol.        = 2.500 V
+  Continued Charge Curr = 40.0 A
+  Charge OCP Delay      = 3 s
+  Charge OCPR Time      = 60 s
+  Continued Discharge   = 200.0 A
+  Discharge OCP Delay   = 300 s
+  Discharge OCPR Time   = 60 s
+  Discharge OTP         = 70.0 °C
+  Discharge OTPR        = 60.0 °C
+  Charge OTP            = 70.0 °C
+  Charge OTPR           = 60.0 °C
+  Charge UTP            = 2.0 °C
+  Charge UTPR           = 7.0 °C
+  MOS OTP               = 80.0 °C
+  MOS OTPR              = 70.0 °C
+  Cell Count            = 16
+  Battery Capacity      = 314 Ah
+  SCP Delay             = 1500 µs
+  SCPR Time             = 5 s
+  Balance Trig. Volt.   = 0.010 V
+  Start Balance Volt.   = 3.000 V
+  Max Balance Cur.      = 2.0 A
+  TMP Stop Heating      = 10 °C
+  TMP Start Heating     = 0 °C
+
+  -- Control-tab toggles --
+  Charge                = ON
+  Discharge             = ON
+  Balance               = ON  (but Balance Current = 0 → idle)
+  Charging Float Mode   = ON
+  Discharge OCP 2       = ON
+  Discharge OCP 3       = ON
+  Everything else       = OFF

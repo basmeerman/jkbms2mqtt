@@ -455,17 +455,21 @@ async def test_poll_loop_runs_then_cancels() -> None:
 # -- Settings readback -----------------------------------------------------------------
 
 
-def _settings_block_with(*, max_charge_a: float = 80.0, charge_on: bool = True) -> list[int]:
+def _settings_block_with(
+    *, max_charge_a: float = 40.0, smart_sleep_v: float = 3.5
+) -> list[int]:
     """Build a settings block with a couple of recognisable values set."""
     regs = [0] * SETTINGS_BLOCK_WORDS
-    # max_charge_current is at 0x102C (encoding U32_DECI → value × 10).
-    val = int(round(max_charge_a * 10))
-    off = 0x102C - SETTINGS_BLOCK_BASE
+    # max_charge_current at 0x1016, U32_MILLI (value × 1000).
+    val = int(round(max_charge_a * 1000))
+    off = 0x1016 - SETTINGS_BLOCK_BASE
     regs[off] = (val >> 16) & 0xFFFF
     regs[off + 1] = val & 0xFFFF
-    # charging_switch at 0x1070 (BOOL32).
-    off = 0x1070 - SETTINGS_BLOCK_BASE
-    regs[off + 1] = 1 if charge_on else 0
+    # smart_sleep_voltage at 0x1000, U32_MILLI.
+    val = int(round(smart_sleep_v * 1000))
+    off = 0x1000 - SETTINGS_BLOCK_BASE
+    regs[off] = (val >> 16) & 0xFFFF
+    regs[off + 1] = val & 0xFFFF
     return regs
 
 
@@ -479,7 +483,7 @@ def _settings_chunk_map(slave: int, block: list[int]) -> dict[tuple[int, int], F
 
 
 async def test_settings_block_state_published() -> None:
-    block = _settings_block_with(max_charge_a=80.0, charge_on=True)
+    block = _settings_block_with(max_charge_a=40.0, smart_sleep_v=3.5)
     client = FakeClient(
         map={
             (1, BASE_RT): FakeResponse(registers=_block_a_for_pack_at(voltage_v=53.0, soc=50)),
@@ -499,9 +503,11 @@ async def test_settings_block_state_published() -> None:
 
     by_topic = {t: p for t, p, _, _ in pub.log}
     # Settings state is published whether or not the tier is enabled.
-    assert by_topic.get("BMS_1/control/max_charge_current") == "80.0"
-    assert by_topic.get("BMS_1/control/charging_switch") == "ON"
-    assert by_topic.get("BMS_1/control/smart_sleep_switch") == "ON"
+    # U32_MILLI → 3 decimals
+    assert by_topic.get("BMS_1/control/max_charge_current") == "40.000"
+    assert by_topic.get("BMS_1/control/smart_sleep_voltage") == "3.500"
+    # Packed bits are unverified — not published without debug flag.
+    assert "BMS_1/control/smart_sleep_switch" not in by_topic
 
 
 def _settings_chunk_addrs() -> tuple[int, ...]:
@@ -561,19 +567,26 @@ async def test_settings_block_timeout_skipped() -> None:
 
 
 async def test_one_settings_chunk_failure_still_publishes_other_chunk() -> None:
-    """Partial chunk failure must not block publishing settings from the chunk that succeeded."""
-    # Place balance_trigger_voltage (0x1014, U32_MILLI, 0.003..1.000) in the
-    # block. It lives in chunk 1 (0x1000..0x1063) so it survives a chunk-2 failure.
+    """Per-register skip-on-partial-failure when reading multiple chunks.
+
+    The verified register table fits in a single chunk under the 125-register
+    Modbus ceiling, but the runner still supports multi-chunk reads. Simulate
+    a multi-chunk scenario by patching ``SETTINGS_BLOCK_CHUNKS`` for this test.
+    """
+    import jkbms2mqtt.bms_runner as runner_mod
     block = [0] * SETTINGS_BLOCK_WORDS
-    btv_addr = 0x1014  # balance_trigger_voltage
+    btv_addr = 0x100A  # balance_trigger_voltage at its verified address
     raw = int(round(0.005 * 1000))  # 5 mV → matches U32_MILLI scaling
     off = btv_addr - SETTINGS_BLOCK_BASE
     block[off] = (raw >> 16) & 0xFFFF
     block[off + 1] = raw & 0xFFFF
 
-    chunk_addrs = _settings_chunk_addrs()
-    first_chunk_addr = chunk_addrs[0]
-    second_chunk_addr = chunk_addrs[1]
+    first_chunk_addr = 0x1000
+    second_chunk_addr = 0x1020
+    fake_chunks = (
+        (first_chunk_addr, 0x20),  # covers balance_trigger_voltage @ 0x100A
+        (second_chunk_addr, 0x24),
+    )
 
     @dataclass
     class _Client:
@@ -597,7 +610,9 @@ async def test_one_settings_chunk_failure_still_publishes_other_chunk() -> None:
         bms_name="BMS_1",
         publish=pub,
     )
-    await runner._poll_once()
+    import unittest.mock
+    with unittest.mock.patch.object(runner_mod, "SETTINGS_BLOCK_CHUNKS", fake_chunks):
+        await runner._poll_once()
     by_topic = {t: p for t, p, _, _ in pub.log}
     assert by_topic.get("BMS_1/control/balance_trigger_voltage") == "0.005"
 
@@ -656,7 +671,7 @@ async def test_settings_failure_log_only_once_per_bms(caplog: pytest.LogCaptureF
 
 
 async def test_packed_bit_register_read_failure_skipped() -> None:
-    block = _settings_block_with(max_charge_a=50.0, charge_on=False)
+    block = _settings_block_with(max_charge_a=50.0)
 
     @dataclass
     class _Client:
@@ -691,7 +706,7 @@ async def test_packed_bit_register_read_failure_skipped() -> None:
 
 
 async def test_packed_bit_register_modbus_error_skipped() -> None:
-    block = _settings_block_with(max_charge_a=50.0, charge_on=False)
+    block = _settings_block_with(max_charge_a=50.0)
 
     @dataclass
     class _Client:

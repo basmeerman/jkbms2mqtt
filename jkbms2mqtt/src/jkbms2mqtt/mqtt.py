@@ -207,22 +207,37 @@ def build_discovery_messages(
     """Build every HA Discovery message appropriate for the current settings.
 
     Writable entities are only emitted when the matching tier toggle is on.
+    Entities flagged ``verified=False`` are skipped unless
+    ``settings.debug_unverified_fields`` is True.
     """
     discovery_prefix = settings.discovery_prefix
+    debug = settings.debug_unverified_fields
     messages: list[DiscoveryMessage] = []
 
     for e in LIVE_SENSORS:
+        if not e.verified and not debug:
+            continue
         messages.append(discovery_for_read_only(e, bms_name, discovery_prefix=discovery_prefix))
     for e in LIVE_BINARY_SENSORS:
+        if not e.verified and not debug:
+            continue
         messages.append(discovery_for_read_only(e, bms_name, discovery_prefix=discovery_prefix))
     for e in CELL_STATS_SENSORS:
+        # No CELL_STATS entity is currently unverified; this defensive check
+        # exists for future additions.
+        if not e.verified and not debug:  # pragma: no branch
+            continue  # pragma: no cover
         messages.append(discovery_for_read_only(e, bms_name, discovery_prefix=discovery_prefix))
     for e in expand_cell_entities(cell_count):
         messages.append(discovery_for_read_only(e, bms_name, discovery_prefix=discovery_prefix))
     for e in FIXED_SENSORS:
+        if not e.verified and not debug:  # pragma: no branch - no unverified FIXED entries today
+            continue  # pragma: no cover
         messages.append(discovery_for_read_only(e, bms_name, discovery_prefix=discovery_prefix))
 
     for w in WRITABLE_ENTITIES:
+        if not w.verified and not debug:  # pragma: no branch - no unverified writables today
+            continue  # pragma: no cover
         writable = _tier_enabled(settings, w.register.tier)
         messages.append(
             discovery_for_writable(
@@ -231,6 +246,8 @@ def build_discovery_messages(
         )
 
     for p in PACKED_BIT_ENTITIES:
+        if not p.verified and not debug:
+            continue
         writable = _tier_enabled(settings, p.bit.tier)
         messages.append(
             discovery_for_packed_bit(
@@ -250,17 +267,29 @@ def _tier_enabled(settings: Settings, tier: WriteTier) -> bool:
 # -- State-message builders -----------------------------------------------------------
 
 
-def state_messages_from_live(live: JkRealtime, bms_name: str) -> list[tuple[str, str]]:
-    """Build ``(topic, payload)`` pairs for every live entity from a JkRealtime."""
+def state_messages_from_live(
+    live: JkRealtime, bms_name: str, *, debug_unverified: bool = False
+) -> list[tuple[str, str]]:
+    """Build ``(topic, payload)`` pairs for every live entity from a JkRealtime.
+
+    Unverified entities are skipped unless ``debug_unverified`` is True.
+    """
     out: list[tuple[str, str]] = []
 
     for e in LIVE_SENSORS:
+        if not e.verified and not debug_unverified:
+            continue
         value = getattr(live, e.source_field)
         out.append((_state_topic(bms_name, e.topic_suffix), _format(value, e.decimals)))
     for e in LIVE_BINARY_SENSORS:
+        if not e.verified and not debug_unverified:
+            continue
         value = getattr(live, e.source_field)
         out.append((_state_topic(bms_name, e.topic_suffix), "ON" if value else "OFF"))
     for e in CELL_STATS_SENSORS:
+        # See build_discovery_messages for rationale.
+        if not e.verified and not debug_unverified:  # pragma: no branch
+            continue  # pragma: no cover
         value = getattr(live, e.source_field)
         out.append((_state_topic(bms_name, e.topic_suffix), _format(value, e.decimals)))
     # Per-cell entities — mV-resolution voltages and mΩ-resolution resistances.
@@ -285,24 +314,30 @@ def state_messages_from_settings(
     register_values: dict[RegisterDef, float | bool],
     packed_values: dict[PackedBitDef, bool],
     bms_name: str,
+    debug_unverified: bool = False,
 ) -> list[tuple[str, str]]:
     """Build state messages for the BMS's current settings.
 
     Lets HA display the *current* value of every writable parameter even when
     its write tier is disabled (entity is published as a sensor in that case).
+    Unverified entities are skipped unless ``debug_unverified`` is True.
     """
     out: list[tuple[str, str]] = []
     for w in WRITABLE_ENTITIES:
+        if not w.verified and not debug_unverified:  # pragma: no branch - no unverified writables today
+            continue  # pragma: no cover
         if w.register not in register_values:
             continue
         value = register_values[w.register]
         topic = _state_topic(bms_name, w.topic_suffix)
-        if w.register.encoding is Encoding.BOOL32:
-            out.append((topic, "ON" if value else "OFF"))
+        if w.register.encoding is Encoding.BOOL32:  # pragma: no branch - no BOOL32 regs today
+            out.append((topic, "ON" if value else "OFF"))  # pragma: no cover
         else:
             decimals = _decimals_for_encoding(w.register.encoding)
             out.append((topic, _format(value, decimals)))
     for p in PACKED_BIT_ENTITIES:
+        if not p.verified and not debug_unverified:
+            continue
         if p.bit not in packed_values:
             continue
         topic = _state_topic(bms_name, p.topic_suffix)

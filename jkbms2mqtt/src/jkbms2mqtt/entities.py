@@ -55,6 +55,11 @@ class ReadOnlyEntity:
     misleading trailing zeros) and surfaced in HA Discovery as
     ``suggested_display_precision`` so the frontend renders at full precision
     instead of falling back to its default 1-decimal rounding.
+
+    ``verified`` is ``True`` for entities whose Modbus offset has been
+    confirmed against a real-hardware capture. Unverified entities are hidden
+    by default; they only appear when ``debug_unverified_fields`` is enabled
+    in the add-on configuration.
     """
 
     object_id: str               # snake_case
@@ -66,6 +71,7 @@ class ReadOnlyEntity:
     unit_of_measurement: str | None
     decimals: int | None
     description: str
+    verified: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,6 +83,7 @@ class WritableEntity:
     register: RegisterDef
     component: Component
     description: str
+    verified: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,6 +94,7 @@ class PackedBitEntity:
     topic_suffix: str            # always `control/<name>`
     bit: PackedBitDef
     component: Component = Component.SWITCH
+    verified: bool = True
 
 
 # -- Read-only sensors from JkRealtime -------------------------------------------------
@@ -289,6 +297,7 @@ LIVE_SENSORS: Final[tuple[ReadOnlyEntity, ...]] = (
         unit_of_measurement="A",
         decimals=3,
         description="Current drawn by the heating element (PB-series only).",
+        verified=False,
     ),
     ReadOnlyEntity(
         object_id="charge_status",
@@ -300,6 +309,7 @@ LIVE_SENSORS: Final[tuple[ReadOnlyEntity, ...]] = (
         unit_of_measurement=None,
         decimals=None,
         description="Charge FSM state (standby / bulk / absorption / float).",
+        verified=False,
     ),
     ReadOnlyEntity(
         object_id="charge_status_time",
@@ -311,6 +321,7 @@ LIVE_SENSORS: Final[tuple[ReadOnlyEntity, ...]] = (
         unit_of_measurement="s",
         decimals=0,
         description="Seconds spent in the current charge FSM state.",
+        verified=False,
     ),
     ReadOnlyEntity(
         object_id="alarm_bits",
@@ -383,6 +394,7 @@ LIVE_BINARY_SENSORS: Final[tuple[ReadOnlyEntity, ...]] = (
         unit_of_measurement=None,
         decimals=None,
         description="Heating-element state (PB-series only).",
+        verified=False,
     ),
 )
 
@@ -574,10 +586,14 @@ def _writable_from_register(reg: RegisterDef) -> WritableEntity:
 
 
 def _writable_from_packed_bit(bit: PackedBitDef) -> PackedBitEntity:
+    # The bit positions for disable_pcl_module_switch / smart_sleep_switch /
+    # timed_stored_data_switch were not confirmed by the BMS_1 capture
+    # (register read 0x3200, none of our bit masks matched). Hidden by default.
     return PackedBitEntity(
         object_id=bit.name,
         topic_suffix=f"control/{bit.name}",
         bit=bit,
+        verified=False,
     )
 
 
