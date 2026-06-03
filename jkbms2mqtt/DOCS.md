@@ -73,25 +73,42 @@ You should see a value (e.g. `53.250`) within roughly one `poll_interval_s`
 for every BMS that's responding.
 
 Devices appear under **Settings → Devices** as `BMS_1`, `BMS_2`, …, one per
-configured `bms_ids` entry.
+configured `bms_ids` entry. Each device exposes the full set of entities
+documented in [docs/ENTITIES.md](docs/ENTITIES.md).
 
 ## Writes
 
-When `enable_basic_writes` is on, HA gains `number` and `switch` entities for
-the operational parameters. Toggle them as usual; the bridge translates each
-to a Modbus 0x10 write to the BMS and echoes the new value to the state topic.
+Every BMS setting is **always visible** in Home Assistant as a status sensor
+showing its current value from the BMS. The tier toggles only control whether
+those entities are *writable*:
 
-When `enable_safety_writes` is on, the protection-threshold parameters
-(OVP/UVP, OCP delays, OTP/UTP) become writable too. **A wrong value here can
-damage the cells or pose a fire risk** — leave off unless you know exactly
-what you're changing.
+- `enable_basic_writes: true` upgrades the basic-tier entities to `number` /
+  `switch` controls (charge / discharge / balance switches, balance
+  thresholds, smart-sleep voltage, etc.).
+- `enable_safety_writes: true` upgrades the safety-tier entities (OVP / UVP,
+  max charge / discharge current, OCP delays, OTP / UTP thresholds, cell
+  count). **A wrong value here can damage the cells or pose a fire risk** —
+  leave off unless you know exactly what you're changing.
 
-A rejected write (out-of-range value, BMS error, transport failure) produces a
-JSON message on `<bms_name>/error`, e.g.:
+Any write to a parameter whose tier is *off* is rejected by the bridge with a
+structured JSON error on `<bms_name>/error`. This is the default safe state:
+HA users can see what every setting is, but cannot accidentally change a
+safety-critical threshold.
+
+Example rejected write (basic tier off):
 
 ```json
-{"param": "max_charge_current", "reason": "value 700.0 outside [0, 600]"}
+{"param": "charging_switch", "reason": "write rejected: enable_basic_writes is off; enable it in the add-on configuration to modify this parameter"}
 ```
+
+Example rejected write (value out of range):
+
+```json
+{"param": "max_charge_current", "reason": "max_charge_current: value 700.0 outside [0, 600]"}
+```
+
+See [docs/ENTITIES.md](docs/ENTITIES.md) for the full list of entities, their
+units, decimals, and the tier required to write them.
 
 ## Troubleshooting
 
