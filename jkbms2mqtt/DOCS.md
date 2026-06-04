@@ -125,6 +125,13 @@ units, decimals, and the tier required to write them.
   versions have a memory hole at `0x1278..0x12EF` so block B reads fail; the
   bridge fills in zeros and the add-on still publishes everything in block A.
 
+## Protocol reference
+
+Primary-source register maps used to calibrate the bridge are in
+[`docs/specifications/`](docs/specifications/) — JIKONG's RS485 Modbus
+V1.0 and V1.1 PDFs plus the CAN reference. The implementation-vs-spec audit
+lives in [`docs/FIELD_AUDIT.md`](docs/FIELD_AUDIT.md).
+
 ## License
 
 MIT. Wiring images included under Apache 2.0 from

@@ -80,7 +80,7 @@ STATIC INFO BLOCK @ 0x1400
   0x1448:  ffff ffff 8fe9 9d03 0000 0000 901f 0000
 
 ==============================================================================
-ANCHOR VALUES (from BMS app screenshots in /docs/*.jpeg)
+ANCHOR VALUES (read from the BMS app at capture time)
 ==============================================================================
   Total voltage         = 50.92 V
   Pack current          = 0.00 A

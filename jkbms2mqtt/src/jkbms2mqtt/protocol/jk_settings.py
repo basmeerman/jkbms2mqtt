@@ -95,6 +95,12 @@ BASIC_REGISTERS: Final[tuple[RegisterDef, ...]] = (
     RegisterDef(name="cell_request_charge_voltage", address=0x1010, encoding=Encoding.U32_MILLI, min_value=1.20, max_value=5.00, step=0.01, unit="V", tier=WriteTier.BASIC, description="Cell voltage the BMS requests from the charger."),
     RegisterDef(name="cell_request_float_voltage", address=0x1012, encoding=Encoding.U32_MILLI, min_value=1.20, max_value=5.00, step=0.01, unit="V", tier=WriteTier.BASIC, description="Cell float voltage the BMS requests from the charger."),
     RegisterDef(name="max_balance_current", address=0x1024, encoding=Encoding.U32_MILLI, min_value=0.0, max_value=10.0, step=0.001, unit="A", tier=WriteTier.BASIC, description="Maximum balance current (hardware-capped at 10 A)."),
+    # BOOL switches at spec V1.0 / V1.1 byte offsets 0x70 / 0x74 / 0x78.
+    # PR #3 removed these on the wrong assumption that no Modbus address
+    # existed; the spec and the BMS_1 capture both confirm them.
+    RegisterDef(name="charging_switch", address=0x1038, encoding=Encoding.BOOL32, min_value=0, max_value=1, step=1, unit=None, tier=WriteTier.BASIC, description="Enable / disable the charge MOSFET."),
+    RegisterDef(name="discharging_switch", address=0x103A, encoding=Encoding.BOOL32, min_value=0, max_value=1, step=1, unit=None, tier=WriteTier.BASIC, description="Enable / disable the discharge MOSFET."),
+    RegisterDef(name="balance_switch", address=0x103C, encoding=Encoding.BOOL32, min_value=0, max_value=1, step=1, unit=None, tier=WriteTier.BASIC, description="Enable / disable active cell balancing."),
     RegisterDef(name="balance_starting_voltage", address=0x1042, encoding=Encoding.U32_MILLI, min_value=1.200, max_value=4.250, step=0.010, unit="V", tier=WriteTier.BASIC, description="Minimum cell voltage before balancing is enabled."),
 )
 
@@ -114,10 +120,14 @@ SAFETY_REGISTERS: Final[tuple[RegisterDef, ...]] = (
     RegisterDef(name="discharge_overcurrent_protection_delay", address=0x101E, encoding=Encoding.U32_RAW, min_value=1, max_value=600, step=1, unit="s", tier=WriteTier.SAFETY, description="Delay before discharge over-current protection trips."),
     RegisterDef(name="discharge_overcurrent_protection_recovery_time", address=0x1020, encoding=Encoding.U32_RAW, min_value=2, max_value=3600, step=1, unit="s", tier=WriteTier.SAFETY, description="Time before discharge OCP can be cleared."),
     RegisterDef(name="short_circuit_protection_recovery_time", address=0x1022, encoding=Encoding.U32_RAW, min_value=1, max_value=3600, step=1, unit="s", tier=WriteTier.SAFETY, description="Time before short-circuit protection can be cleared."),
-    RegisterDef(name="discharge_overtemperature_protection", address=0x1026, encoding=Encoding.I32_DECI, min_value=-40, max_value=150, step=0.5, unit="°C", tier=WriteTier.SAFETY, description="Discharge over-temperature protection."),
-    RegisterDef(name="discharge_overtemperature_protection_recovery", address=0x1028, encoding=Encoding.I32_DECI, min_value=-40, max_value=150, step=0.5, unit="°C", tier=WriteTier.SAFETY, description="Discharge OTP recovery threshold."),
-    RegisterDef(name="charge_overtemperature_protection", address=0x102A, encoding=Encoding.I32_DECI, min_value=-40, max_value=150, step=0.5, unit="°C", tier=WriteTier.SAFETY, description="Charge over-temperature protection."),
-    RegisterDef(name="charge_overtemperature_protection_recovery", address=0x102C, encoding=Encoding.I32_DECI, min_value=-40, max_value=150, step=0.5, unit="°C", tier=WriteTier.SAFETY, description="Charge OTP recovery threshold."),
+    # Spec V1.1 byte 0x4C → reg 0x1026 is TMPBatCOT (Charge OTP); discharge
+    # variants follow at 0x102A/0x102C. The previous table had charge/discharge
+    # labels swapped, which would have written discharge-OTP values to the
+    # charge-OTP register when both tiers were enabled.
+    RegisterDef(name="charge_overtemperature_protection", address=0x1026, encoding=Encoding.I32_DECI, min_value=-40, max_value=150, step=0.5, unit="°C", tier=WriteTier.SAFETY, description="Charge over-temperature protection."),
+    RegisterDef(name="charge_overtemperature_protection_recovery", address=0x1028, encoding=Encoding.I32_DECI, min_value=-40, max_value=150, step=0.5, unit="°C", tier=WriteTier.SAFETY, description="Charge OTP recovery threshold."),
+    RegisterDef(name="discharge_overtemperature_protection", address=0x102A, encoding=Encoding.I32_DECI, min_value=-40, max_value=150, step=0.5, unit="°C", tier=WriteTier.SAFETY, description="Discharge over-temperature protection."),
+    RegisterDef(name="discharge_overtemperature_protection_recovery", address=0x102C, encoding=Encoding.I32_DECI, min_value=-40, max_value=150, step=0.5, unit="°C", tier=WriteTier.SAFETY, description="Discharge OTP recovery threshold."),
     RegisterDef(name="charge_undertemperature_protection", address=0x102E, encoding=Encoding.I32_DECI, min_value=-40, max_value=50, step=0.5, unit="°C", tier=WriteTier.SAFETY, description="Charge under-temperature protection (lithium plating risk)."),
     RegisterDef(name="charge_undertemperature_protection_recovery", address=0x1030, encoding=Encoding.I32_DECI, min_value=-40, max_value=50, step=0.5, unit="°C", tier=WriteTier.SAFETY, description="Charge UTP recovery threshold."),
     RegisterDef(name="power_tube_overtemperature_protection", address=0x1032, encoding=Encoding.I32_DECI, min_value=30, max_value=100, step=0.5, unit="°C", tier=WriteTier.SAFETY, description="MOSFET over-temperature protection."),
@@ -128,14 +138,27 @@ SAFETY_REGISTERS: Final[tuple[RegisterDef, ...]] = (
 )
 
 
-# -- Packed-bit register at 0x1114 -----------------------------------------------------
 
-PACKED_BIT_REGISTER: Final = 0x1114
+
+# -- Packed-bit register at 0x108A ------------------------------------------------------
+# Spec V1.1 places this UINT16 at byte offset 0x114 in the settings block —
+# Modbus reg 0x1000 + 0x114/2 = 0x108A. PR #3 used the empirical alias 0x1114
+# which happened to return matching data on PB2A16S20P (likely firmware-side
+# memory mirror), but the spec'd address is the canonical one.
+# Bit positions per V1.1 spec page 3:
+#   BIT0 HeatEN          BIT5 SpecialCharger
+#   BIT1 DisableTempSensor BIT6 SmartSleep
+#   BIT2 GPSHeartbeat    BIT7 DisablePCLModule  (V1.1)
+#   BIT3 PortSwitch      BIT8 TimedStoredData   (V1.1)
+#   BIT4 LCDAlwaysOn     BIT9 ChargingFloatMode (V1.1)
+# V1.0 only documents BIT0–6.
+
+PACKED_BIT_REGISTER: Final = 0x108A
 
 PACKED_BITS: Final[tuple[PackedBitDef, ...]] = (
-    PackedBitDef(name="disable_pcl_module_switch", register=PACKED_BIT_REGISTER, bit_mask=0x0080, tier=WriteTier.BASIC, description="Disable the pre-charge limit module."),
     PackedBitDef(name="smart_sleep_switch", register=PACKED_BIT_REGISTER, bit_mask=0x0040, tier=WriteTier.BASIC, description="Enable smart-sleep behaviour."),
-    PackedBitDef(name="timed_stored_data_switch", register=PACKED_BIT_REGISTER, bit_mask=0x0020, tier=WriteTier.BASIC, description="Enable periodic data storage in BMS RAM."),
+    PackedBitDef(name="disable_pcl_module_switch", register=PACKED_BIT_REGISTER, bit_mask=0x0080, tier=WriteTier.BASIC, description="Disable the pre-charge limit module (V1.1)."),
+    PackedBitDef(name="timed_stored_data_switch", register=PACKED_BIT_REGISTER, bit_mask=0x0100, tier=WriteTier.BASIC, description="Enable periodic data storage in BMS RAM (V1.1)."),
 )
 
 

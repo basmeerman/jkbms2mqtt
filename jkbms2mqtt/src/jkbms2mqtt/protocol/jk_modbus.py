@@ -58,20 +58,24 @@ _OFF_TOTAL_CYCLE_CAP: Final = 0x5A   # uint32, mAh (lifetime accumulated)
 _OFF_SOH_PRECHARGE: Final = 0x5C     # u8 SoH | u8 precharge
 _OFF_RUNTIME: Final = 0x5E           # uint32, seconds
 _OFF_CHARGE_DISCHARGE: Final = 0x60  # u8 charge_enabled | u8 discharge_enabled
-# Heating / charge-FSM fields — SPECULATIVE. Values match a "no heater, no
-# charge" capture (all zero), so the offsets are compatible but unproven.
-# Gated behind the debug_unverified_fields config flag.
-_OFF_HEATING_CURRENT: Final = 0x64   # SPECULATIVE — int16, mA
-_OFF_HEATING_STATE: Final = 0x65     # SPECULATIVE — u16 non-zero = on
-_OFF_CHARGE_STATUS: Final = 0x6C     # SPECULATIVE — actual location unknown; the
-                                     # BMS_1 capture decoded 0 here while the app
-                                     # reported "Bulk".
-_OFF_CHARGE_STATUS_TIME: Final = 0x6D  # SPECULATIVE
-# Probes 3/4/5 live in the block-C window (0x12F0..), not in block B (0x127C..).
-# The previous 0x7C/0x7D/0x7E offsets read zero/mirrored data on real hardware.
-_OFF_PROBE_3_TEMP: Final = 0xF4      # int16  × 0.1 °C — block C
-_OFF_PROBE_4_TEMP: Final = 0xF5      # int16  × 0.1 °C — block C
-_OFF_PROBE_5_TEMP: Final = 0xF6      # int16  × 0.1 °C — block C
+# Heating fields, per spec V1.1:
+#   byte 0xD0..0xD1 = UINT16 — low byte is temp-sensor-absent bitmap,
+#                              high byte is Heating status (1=on, 0=off)
+#   byte 0xE6      = INT16  — HeatCurrent (mA)
+_OFF_TEMP_SENSOR_HEATING: Final = 0x68   # low: TempSensorAbsent bits; high: Heating
+_OFF_HEATING_CURRENT: Final = 0x73       # int16, mA
+# Probes 3/4/5: spec V1.1 places these at byte 0xF8/0xFA/0xFC → regs
+# 0x127C/0x127D/0x127E (offsets 0x7C/0x7D/0x7E in the buffer). On PB2A16S20P
+# firmware (the user's hardware), those locations read zero and the actual
+# values appear at regs 0x12F4..0x12F6 in the block-C window — a documented
+# firmware deviation, see specifications/README.md.
+_OFF_PROBE_3_TEMP: Final = 0xF4      # SPEC-DEVIATION — spec says 0x7C
+_OFF_PROBE_4_TEMP: Final = 0xF5      # SPEC-DEVIATION — spec says 0x7D
+_OFF_PROBE_5_TEMP: Final = 0xF6      # SPEC-DEVIATION — spec says 0x7E
+# charge_status / charge_status_time were removed: V1.0 and V1.1 RS485 Modbus
+# do not document a "charge FSM state" field. The "Bulk"/"Float" status shown
+# by the BMS app is sourced from the proprietary BLE/UART-TTL protocol, not
+# from any Modbus register.
 
 MAX_CELLS: Final = 16
 RT_BLOCK_WORDS: Final = 0x110        # total real-time block size we expect
@@ -114,14 +118,6 @@ ALARM_NAMES: Final = (
 )
 
 
-# Charge-FSM state codes as published in the real-time block.
-CHARGE_STATUS_NAMES: Final = {
-    0: "standby",
-    1: "bulk",
-    2: "absorption",
-    3: "float",
-    4: "request_full_charge",
-}
 
 
 # -- Decoded dataclasses --------------------------------------------------------------
@@ -172,10 +168,6 @@ class JkRealtime:
 
     heating_active: bool
     heating_current_a: float
-
-    charge_status_id: int
-    charge_status: str                 # decoded name, or empty if unknown id
-    charge_status_time_s: int
 
     alarm_bits: int
     alarms: tuple[str, ...]
@@ -300,8 +292,10 @@ def decode_realtime(regs: list[int]) -> JkRealtime:
         if alarm_bits & (1 << i)
     )
 
-    charge_status_id = _u16(regs, _OFF_CHARGE_STATUS)
-    charge_status_name = CHARGE_STATUS_NAMES.get(charge_status_id, "")
+    # Spec V1.1: byte 0xD0/0xD1 is a packed UINT16. Low byte = temp-sensor
+    # absent bitmap. High byte = Heating status (1=on / 0=off).
+    temp_heat_word = _u16(regs, _OFF_TEMP_SENSOR_HEATING)
+    heating_active = ((temp_heat_word >> 8) & 0xFF) != 0
 
     return JkRealtime(
         cell_voltages_v=tuple(cells),
@@ -333,11 +327,8 @@ def decode_realtime(regs: list[int]) -> JkRealtime:
         runtime_s=_u32(regs, _OFF_RUNTIME),
         charge_enabled=charge_enabled,
         discharge_enabled=discharge_enabled,
-        heating_active=_u16(regs, _OFF_HEATING_STATE) != 0,
+        heating_active=heating_active,
         heating_current_a=_i16(regs, _OFF_HEATING_CURRENT) / 1000.0,
-        charge_status_id=charge_status_id,
-        charge_status=charge_status_name,
-        charge_status_time_s=_u16(regs, _OFF_CHARGE_STATUS_TIME),
         alarm_bits=alarm_bits,
         alarms=alarms,
         alarms_csv=",".join(alarms),

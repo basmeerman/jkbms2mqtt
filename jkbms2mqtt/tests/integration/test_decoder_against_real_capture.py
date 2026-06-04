@@ -234,16 +234,23 @@ class TestStaticInfoAnchors:
     ("cell_request_float_voltage", 3.500),
     ("max_balance_current", 2.000),
     ("balance_starting_voltage", 3.000),
+    # Spec-restored BOOL switches at 0x1038/0x103A/0x103C.
+    ("charging_switch", True),
+    ("discharging_switch", True),
+    ("balance_switch", True),
 ])
 def test_basic_settings_match_app(
-    name: str, expected: float, settings_buffer: tuple[list[int], set[int]]
+    name: str, expected: float | bool, settings_buffer: tuple[list[int], set[int]]
 ) -> None:
     """Every basic-tier address verified against the BMS app's Settings tab."""
     regs, _ = settings_buffer
     reg = find_register(name)
     assert reg is not None, f"{name} not in BASIC_REGISTERS"
     assert reg in BASIC_REGISTERS
-    assert decode_register_value(reg, regs) == pytest.approx(expected, abs=1e-3)
+    if isinstance(expected, bool):
+        assert decode_register_value(reg, regs) is expected
+    else:
+        assert decode_register_value(reg, regs) == pytest.approx(expected, abs=1e-3)
 
 
 @pytest.mark.parametrize(("name", "expected"), [
@@ -281,14 +288,51 @@ def test_safety_settings_match_app(
     assert decode_register_value(reg, regs) == pytest.approx(expected, abs=1e-2)
 
 
+# -- Spec compliance: address-name binding --------------------------------------------
+
+def test_otp_register_addresses_match_spec() -> None:
+    """Charge / discharge OTP labels must point at the spec'd addresses.
+
+    Both values are 70 °C on this BMS so a value-only check can't detect a
+    label swap. This test asserts that ``charge_overtemperature_protection``
+    maps to spec byte 0x4C → reg 0x1026 and discharge variants to 0x102A —
+    closing the swap regression introduced earlier.
+    """
+    by_name = {r.name: r.address for r in SAFETY_REGISTERS}
+    assert by_name["charge_overtemperature_protection"] == 0x1026
+    assert by_name["charge_overtemperature_protection_recovery"] == 0x1028
+    assert by_name["discharge_overtemperature_protection"] == 0x102A
+    assert by_name["discharge_overtemperature_protection_recovery"] == 0x102C
+
+
 # -- Packed-bit register --------------------------------------------------------------
 
 def test_packed_bit_register_value(packed_bit_value: int) -> None:
-    """The packed-bit register held 0x3200 in this capture.
+    """The packed-bit register held 0x3200 in the captured firmware.
 
-    None of our currently-mapped bits (PCL/smart_sleep/timed_stored at masks
-    0x80/0x40/0x20) hit any set bit here, which is consistent with the BMS
-    app showing all three Control-tab toggles as off — but does NOT prove the
-    mask positions are right. Hence ``verified=False`` on those entities.
+    Bit 9 (ChargingFloatMode) is set, matching the BMS app's
+    "Charging Float Mode: ON". Bits 12 / 13 are also set, corresponding to
+    "Discharge OCP 2" / "Discharge OCP 3" — not documented in V1.1 spec.
     """
     assert packed_bit_value == 0x3200
+
+
+def test_packed_bit_decodes_per_spec_v11_positions() -> None:
+    """The three exposed packed bits decode according to spec V1.1 masks."""
+    from jkbms2mqtt.protocol.jk_settings import (
+        PACKED_BITS,
+        decode_packed_bit_value,
+    )
+
+    bits = {b.name: b for b in PACKED_BITS}
+    # Spec V1.1: BIT6 SmartSleep, BIT7 DisablePCLModule, BIT8 TimedStoredData.
+    assert bits["smart_sleep_switch"].bit_mask == 0x0040
+    assert bits["disable_pcl_module_switch"].bit_mask == 0x0080
+    assert bits["timed_stored_data_switch"].bit_mask == 0x0100
+
+    # In the captured 0x3200 register value, none of those three are set —
+    # matches app Control-tab where SmartSleep/Par-Limiter/TimedStored are OFF.
+    raw = 0x3200
+    assert decode_packed_bit_value(bits["smart_sleep_switch"], raw) is False
+    assert decode_packed_bit_value(bits["disable_pcl_module_switch"], raw) is False
+    assert decode_packed_bit_value(bits["timed_stored_data_switch"], raw) is False
