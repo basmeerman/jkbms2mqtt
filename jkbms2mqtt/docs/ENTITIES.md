@@ -1,7 +1,10 @@
 # Entity reference
 
 Every MQTT entity the add-on publishes for each BMS, with its topic, unit,
-display precision, and access state.
+display precision, and access state. Every register offset and encoding is
+calibrated against [`specifications/BMS.RS485.Modbus.V1.1.pdf`](specifications/BMS.RS485.Modbus.V1.1.pdf)
+(see [`specifications/README.md`](specifications/README.md)); deviations are
+documented in [`FIELD_AUDIT.md`](FIELD_AUDIT.md).
 
 ## Access states
 
@@ -46,9 +49,7 @@ commanding a new value posts to `<topic>/set`.
 | `Balance_current` | `balance_current` | A | 3 | Cell-balance current |
 | `Mos_temp` | `mos_temp` | °C | 1 | MOSFET temperature |
 | `Probe_1_temp` … `Probe_5_temp` | `probe_1_temp` … `probe_5_temp` | °C | 1 | External probe temperatures |
-| `Heating_Current` ⚠ | `heating_current` | A | 3 | Heating-element current (PB-series only) — unverified |
-| `charge_status` ⚠ | `charge_status` | — | — | Charge FSM state (`standby` / `bulk` / `absorption` / `float`) — unverified |
-| `charge_status_time` ⚠ | `charge_status_time` | s | 0 | Seconds in current FSM state — unverified |
+| `Heating_Current` ⚠ | `heating_current` | A | 3 | Heating-element current (spec V1.1 byte 0xE6 → reg 0x1273) — unverified |
 | `alarm_bits` | `alarm_bits` | — | 0 | Raw 32-bit alarm bitmap |
 | `alarms` | `alarms` | — | — | Active alarms, comma-separated |
 
@@ -91,9 +92,10 @@ commanding a new value posts to `<topic>/set`.
 
 ## Read / write — basic tier
 
-All addresses verified against `scripts/captures/BMS_1.txt` and the BMS app
-screenshots. Visible as `number` when `enable_basic_writes: true`, as
-`sensor` otherwise (current value still shown).
+All addresses calibrated against spec V1.1 and verified against
+`scripts/captures/BMS_1.txt`. Visible as `number` / `switch` when
+`enable_basic_writes: true`, as `sensor` / `binary_sensor` otherwise (current
+value still shown).
 
 | Topic suffix | Object id | Unit | Description |
 |---|---|---|---|
@@ -104,13 +106,10 @@ screenshots. Visible as `number` when `enable_basic_writes: true`, as
 | `control/cell_request_charge_voltage` | `cell_request_charge_voltage` | V | Cell voltage requested from charger |
 | `control/cell_request_float_voltage` | `cell_request_float_voltage` | V | Cell float voltage requested |
 | `control/max_balance_current` | `max_balance_current` | A | Maximum balance current (hardware-capped at 10 A) |
+| `control/charging_switch` | `charging_switch` | — | Enable / disable the charge MOSFET (spec byte 0x70 → reg 0x1038) |
+| `control/discharging_switch` | `discharging_switch` | — | Enable / disable the discharge MOSFET (spec byte 0x74 → reg 0x103A) |
+| `control/balance_switch` | `balance_switch` | — | Enable / disable active cell balancing (spec byte 0x78 → reg 0x103C) |
 | `control/balance_starting_voltage` | `balance_starting_voltage` | V | Minimum cell voltage before balancing engages |
-
-The `charging_switch` / `discharging_switch` / `balance_switch` entities from
-earlier versions of the bridge are **not present**: no verified Modbus address
-exists for them on the V1.0/V1.1 protocol. Read-only state for those flags is
-still available via the `Switch_Charge` / `Switch_Discharge` / `Switch_Balance`
-binary sensors in the live block.
 
 ### Unverified packed-bit toggles (basic, hidden by default)
 
@@ -169,8 +168,12 @@ as `sensor` otherwise.
 ## Fields surveyed but **not** exposed
 
 These fields appear in some other JK-BMS bridges but cannot be read through
-the standard JK RS485 Modbus V1.0 / V1.1 register map. They are only available
-on the BLE / UART-TTL protocol variants and so cannot be added to this bridge:
+the standard JK RS485 Modbus V1.0 / V1.1 register map (verified against
+[`specifications/`](specifications/)). They are only available on the BLE /
+UART-TTL protocol variants and so cannot be added to this bridge:
+
+- `charge_status` / `charge_status_time` — the "Bulk / Float" FSM state the
+  BMS app shows; not in V1.1 Modbus register map at any address.
 
 - `emergency_time_countdown` — BLE-only state machine
 - `smart_sleep_countdown` — BLE-only

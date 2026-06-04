@@ -1,160 +1,146 @@
-# Field audit against real hardware
+# Field audit — spec vs implementation vs hardware
 
-Source: `scripts/captures/BMS_1.txt` (JK_PB2A16S20P, fw 15.41) +
-BMS app screenshots in repo-root `/docs/*.jpeg`. All hex offsets below are word
-offsets from the indicated block base; raw bytes are quoted verbatim from the
-dump.
+Cross-checked against three sources:
+
+1. **Spec** — [`specifications/BMS.RS485.Modbus.V1.1.pdf`](specifications/BMS.RS485.Modbus.V1.1.pdf) (authoritative for PB2A16S20P firmware), with [`V1.0.pdf`](specifications/BMS.RS485.Modbus.V1.0.pdf) as historical reference.
+2. **Hardware capture** — [`../scripts/captures/BMS_1.txt`](../scripts/captures/BMS_1.txt) (PB2A16S20P, fw 15.41).
+3. **BMS app values** — recorded textually in the capture's anchor section; original phone screenshots removed from the repo.
+
+The spec uses **byte offsets** from the block base; Modbus register address =
+`block_base + (byte_offset / 2)`. Each `UINT32` field spans two consecutive
+Modbus registers (high word first).
 
 Verdict legend:
 
-- **VERIFIED** — raw bytes at our offset decode to the same value as the BMS app.
-- **WRONG** — our offset reads a different value than the app; the field needs a different address.
-- **SUSPECT** — our offset reads a value compatible with the app, but the data is all zeros, so we can't actually prove the offset.
+- **MATCH** — implementation address/encoding equals spec, and hardware agrees.
+- **FW-DEVIATION** — implementation matches hardware, but hardware deviates from spec for this field (firmware bug or undocumented behaviour).
+- **FIXED** — bug found in this audit and corrected by the same PR.
 
 ---
 
-## Real-time block (`0x1200`)
+## Real-time block @ `0x1200`
 
-| Field | Offset | Raw | Decoded | App | Verdict |
-|---|---|---|---|---|---|
-| `cell_voltages_v[1..16]` | `0x00..0x0F` | 16× `0c6f` | 3.183 V × 16 | 3.183 V × 16 | **VERIFIED** |
-| `cell_resistances_ohm[1..16]` | `0x80..0x8F` (ours) | mostly zero + mirror noise | wrong values | 0.062 / 0.066 / 0.076 … | **WRONG** — actual offset is `0x25..0x34` (raw at `0x1225..0x1234` matches the app cell-by-cell) |
-| Cell-present bitmap | `0x20..0x21` | `0000 ffff` | 16 cells present | 16 cells | **VERIFIED** |
-| `cell_voltage_avg_v` | `0x22` | `0c6f` | 3.183 V | 3.183 V | **VERIFIED** |
-| MOS temp | `0x45` | `00e7` | 23.1 °C | 23.1 °C | **VERIFIED** |
-| Total voltage | `0x48..0x49` | `0000 c6eb` | 50.923 V | 50.92 V | **VERIFIED** |
-| Total current | `0x4C..0x4D` | `0000 0000` | 0.000 A | 0.00 A | **VERIFIED** (zero-data) |
-| Probe 1 | `0x4E` | `00d8` | 21.6 °C | T1 21.6 °C | **VERIFIED** |
-| Probe 2 | `0x4F` | `00d8` | 21.6 °C | T2 21.5 °C | **VERIFIED** (display lag) |
-| Probe 3 | `0x7C` (ours) | `0000` (zero/mirror) | 0.0 °C | (not shown in app) | **WRONG** — actual offset `0xF4` (raw `00e7` = 23.1 °C in block C) |
-| Probe 4 | `0x7D` (ours) | `0000` | 0.0 °C | T4 21.6 °C | **WRONG** — actual offset `0xF5` (raw `00d8` = 21.6 °C) |
-| Probe 5 | `0x7E` (ours) | `0000` | 0.0 °C | T5 21.8 °C | **WRONG** — actual offset `0xF6` (raw `00da` = 21.8 °C) |
-| Alarm bits | `0x50..0x51` | `0000 0000` | 0 | no alarms | **VERIFIED** (zero-data) |
-| Balance state \| SoC | `0x53` | `003b` | balance off, SoC 59 % | 59 % | **VERIFIED** |
-| Remaining capacity | `0x54..0x55` | `0002 cee9` | 184.04 Ah | 184.0 Ah | **VERIFIED** |
-| Nominal capacity | `0x56..0x57` | `0004 ca90` | 314.0 Ah | 314.0 Ah | **VERIFIED** |
-| Cycle count | `0x58..0x59` | `0000 0000` | 0 | 0 | **VERIFIED** (zero-data) |
-| `total_cycle_capacity_ah` | `0x5A..0x5B` | `0000 6138` | 24.89 Ah | 24.9 Ah | **VERIFIED** ⭐ |
-| SoH \| precharge | `0x5C` | `6400` | 100 % | 100 % | **VERIFIED** |
-| Runtime | `0x5E..0x5F` | `00ba a7b0` | 12 232 624 s | 141d13h59m27s = 12 232 767 s | **VERIFIED** (143 s drift between capture & screenshot) |
-| Charge \| discharge enabled | `0x60` | `0101` | both ON | both ON | **VERIFIED** |
-| `heating_current_a` | `0x64` | `0000` | 0.000 A | 0.000 A | **SUSPECT** (only verifiable when heater runs) |
-| `heating_active` | `0x65` | `0000` | OFF | OFF | **SUSPECT** |
-| `charge_status_id` | `0x6C` | `0000` | id 0 → `standby` | **Bulk** | **WRONG** — actual location not known from this single capture (registers near 0x1268..0x126B show non-zero data that may carry it) |
-| `charge_status_time_s` | `0x6D` | `0000` | 0 s | 0 s | **SUSPECT** |
-
-## Static-info block (`0x1400`)
-
-| Field | Offset | Decoded | App | Verdict |
+| Field | Spec byte | Spec reg | Impl offset | Verdict |
 |---|---|---|---|---|
-| `model` | `0x00..0x07` | `JK_PB2A16S20P` | JK_PB2A16S20P | **VERIFIED** |
-| `hw_version` | `0x08..0x0B` | `15A` | 15A | **VERIFIED** |
-| `sw_version` | `0x0C..0x0F` | `15.41` | 15.41 | **VERIFIED** |
-| `serial_number` | `0x28..0x2F` | `50314490295000` | (matches `5031449029500` in info hex) | **VERIFIED** |
+| `CellVol[0..15]` | `0x00..0x1E` | `0x1200..0x120F` | `0x00..0x0F` | **MATCH** |
+| `CellSta` (present bitmap) | `0x40..0x43` | `0x1220..0x1221` | `0x20..0x21` | **MATCH** |
+| `CellVolAve` | `0x44` | `0x1222` | `0x22` | **MATCH** |
+| `CellVdifMax` | `0x46` | `0x1223` | `0x23` | **MATCH** |
+| `CellWireRes[0..15]` (mΩ) | `0x4A..0x68` | `0x1225..0x1234` | `0x25..0x34` | **FIXED** in PR #3 from speculative `0x80` |
+| `TempMos` | `0x8A` | `0x1245` | `0x45` | **MATCH** |
+| `BatVol` | `0x90..0x93` | `0x1248..0x1249` | `0x48..0x49` | **MATCH** |
+| `BatWatt` (mW) | `0x94..0x97` | `0x124A..0x124B` | — (derived as V × I) | **OK** (computed not read) |
+| `BatCurrent` | `0x98..0x9B` | `0x124C..0x124D` | `0x4C..0x4D` | **MATCH** |
+| `TempBat 1` | `0x9C` | `0x124E` | `0x4E` | **MATCH** |
+| `TempBat 2` | `0x9E` | `0x124F` | `0x4F` | **MATCH** |
+| alarms (UINT32) | `0xA0..0xA3` | `0x1250..0x1251` | `0x50..0x51` | **MATCH** |
+| `BalanCurrent` | `0xA4` | `0x1252` | `0x52` | **MATCH** |
+| `BalanSta\|SOCStateOfcharge` | `0xA6` | `0x1253` | `0x53` | **MATCH** |
+| `SOCCapRemain` | `0xA8..0xAB` | `0x1254..0x1255` | `0x54..0x55` | **MATCH** |
+| `SOCFullChargeCap` | `0xAC..0xAF` | `0x1256..0x1257` | `0x56..0x57` | **MATCH** |
+| `SOCCycleCount` | `0xB0..0xB3` | `0x1258..0x1259` | `0x58..0x59` | **MATCH** |
+| `SOCCycleCap` | `0xB4..0xB7` | `0x125A..0x125B` | `0x5A..0x5B` | **MATCH** |
+| `SOCSOH\|Precharge` | `0xB8` | `0x125C` | `0x5C` | **MATCH** |
+| `RunTime` | `0xBC..0xBF` | `0x125E..0x125F` | `0x5E..0x5F` | **MATCH** |
+| `Charge\|Discharge` | `0xC0` | `0x1260` | `0x60` | **MATCH** |
+| `Heating` (high byte of) | `0xD0..0xD1` | `0x1268` | **FIXED** — was at speculative `0x65` |
+| `HeatCurrent` | `0xE6` | `0x1273` | **FIXED** — was at speculative `0x64` (which is actually `TimeCOCPR`) |
+| `TempBat 3` | `0xF8` | `0x127C` | empirical `0xF4` | **FW-DEVIATION** — spec'd reg reads zero on PB2A16S20P; data lives at `0x12F4` |
+| `TempBat 4` | `0xFA` | `0x127D` | empirical `0xF5` | **FW-DEVIATION** |
+| `TempBat 5` | `0xFC` | `0x127E` | empirical `0xF6` | **FW-DEVIATION** |
+| `charge_status_id` | — | — | `0x6C` | **REMOVED** — not in V1.0/V1.1 spec; was a speculative offset |
+| `charge_status_time_s` | — | — | `0x6D` | **REMOVED** — not in V1.0/V1.1 spec |
 
-The ASCII at offset `0x18..0x1B` is `295.` — part of an extended serial string,
-**not** a cell-chemistry code. The previous `cell_type` entity (already removed
-in PR #2) was decoding this as a u16 `12857` = ASCII `"29"`.
+## Settings block @ `0x1000`
 
-## Settings block (`0x1000`) — the big finding
-
-**All writable register addresses in our table are off.** The actual JK settings
-layout is one 4-byte (u32) parameter every 2 register words (`+0x02`); our
-table assumes `+0x04` spacing. Combined with the `U32_DECI` encoding we used
-for currents (when the BMS actually uses `U32_MILLI`), we are reading and would
-write the **wrong register** for almost every entry.
-
-Worked example for the safety-tier `max_charge_current`:
-
-- Our table: address `0x102C`, encoding `U32_DECI`, decoded = `0x0000_0258 / 10 = 60.0 A`.
-- App: `Continued Charge Curr = 40.0 A`.
-- Real location: `0x1016`, encoding `U32_MILLI`, raw `0x0000_9C40 / 1000 = 40.0 A`. ✓
-- Address `0x102C` is actually `Charge OTPR` (charge over-temperature recovery).
-
-A user with `enable_safety_writes: true` who sets `max_charge_current = 100` via
-HA would, today, write 1000 to `0x102C` → set Charge OTPR to 100 °C. The pack
-would then not recover from charge-over-temperature until cells reach 100 °C.
-**This is the most serious finding of the audit.**
-
-Reconstructed register table (every line below matches the BMS app):
-
-| Address | Setting | Encoding | App label | Tier |
+| Field | Spec byte | Spec reg | Impl reg | Verdict |
 |---|---|---|---|---|
-| `0x1000` | `smart_sleep_voltage` | `U32_MILLI` | Vol. Smart Sleep | basic |
-| `0x1002` | `cell_voltage_undervoltage_protection` | `U32_MILLI` | Cell UVP | safety |
-| `0x1004` | `cell_voltage_undervoltage_recovery` | `U32_MILLI` | Cell UVPR | safety |
-| `0x1006` | `cell_voltage_overvoltage_protection` | `U32_MILLI` | Cell OVP | safety |
-| `0x1008` | `cell_voltage_overvoltage_recovery` | `U32_MILLI` | Cell OVPR | safety |
-| `0x100A` | `balance_trigger_voltage` | `U32_MILLI` | Balance Trig. Volt. (= 0.010 V) | basic |
-| `0x100C` | `cell_soc100_voltage` | `U32_MILLI` | SOC-100% Volt. | basic |
-| `0x100E` | `cell_soc0_voltage` | `U32_MILLI` | SOC-0% Volt. | basic |
-| `0x1010` | `cell_request_charge_voltage` | `U32_MILLI` | Vol. Cell RCV | basic |
-| `0x1012` | `cell_request_float_voltage` | `U32_MILLI` | Vol. Cell RFV | basic |
-| `0x1014` | `power_off_voltage` | `U32_MILLI` | Power Off Vol. | safety |
-| `0x1016` | `max_charge_current` | `U32_MILLI` | Continued Charge Curr | safety |
-| `0x1018` | `charge_overcurrent_protection_delay` | `U32_RAW` | Charge OCP Delay (s) | safety |
-| `0x101A` | `charge_overcurrent_protection_recovery_time` | `U32_RAW` | Charge OCPR Time (s) | safety |
-| `0x101C` | `max_discharge_current` | `U32_MILLI` | Continued Discharge Curr | safety |
-| `0x101E` | `discharge_overcurrent_protection_delay` | `U32_RAW` | Discharge OCP Delay (s) | safety ⭐ NEW |
-| `0x1020` | `discharge_overcurrent_protection_recovery_time` | `U32_RAW` | Discharge OCPR Time (s) | safety ⭐ NEW |
-| `0x1022` | `short_circuit_protection_recovery_time` | `U32_RAW` | SCPR Time (s) | safety ⭐ NEW |
-| `0x1024` | `max_balance_current` | `U32_MILLI` | Max Balance Cur. | basic |
-| `0x1026` | `discharge_overtemperature_protection` | `I32_DECI` | Discharge OTP (°C) | safety |
-| `0x1028` | `discharge_overtemperature_protection_recovery` | `I32_DECI` | Discharge OTPR | safety |
-| `0x102A` | `charge_overtemperature_protection` | `I32_DECI` | Charge OTP | safety |
-| `0x102C` | `charge_overtemperature_protection_recovery` | `I32_DECI` | Charge OTPR | safety |
-| `0x102E` | `charge_undertemperature_protection` | `I32_DECI` | Charge UTP | safety |
-| `0x1030` | `charge_undertemperature_protection_recovery` | `I32_DECI` | Charge UTPR | safety |
-| `0x1032` | `power_tube_overtemperature_protection` | `I32_DECI` | MOS OTP | safety |
-| `0x1034` | `power_tube_overtemperature_protection_recovery` | `I32_DECI` | MOS OTPR | safety |
-| `0x1036` | `cell_count` | `U32_RAW` | Cell Count | safety |
-| `0x103E` | `nominal_capacity_ah` | `U32_MILLI` | Battery Capacity (314.0 Ah → 314000 mAh) | safety ⭐ NEW (was never writable) |
-| `0x1040` | `short_circuit_protection_delay_us` | `U32_RAW` | SCP Delay (µs) | safety ⭐ NEW |
-| `0x1042` | `balance_starting_voltage` | `U32_MILLI` | Start Balance Volt. | basic |
+| `VolSmartSleep` | `0x00` | `0x1000` | `0x1000` | **MATCH** |
+| `VolCellUV` | `0x04` | `0x1002` | `0x1002` | **MATCH** |
+| `VolCellUVPR` | `0x08` | `0x1004` | `0x1004` | **MATCH** |
+| `VolCellOV` | `0x0C` | `0x1006` | `0x1006` | **MATCH** |
+| `VolCellOVPR` | `0x10` | `0x1008` | `0x1008` | **MATCH** |
+| `VolBalanTrig` | `0x14` | `0x100A` | `0x100A` | **MATCH** |
+| `VolSOC100%` | `0x18` | `0x100C` | `0x100C` | **MATCH** |
+| `VolSOC0%` | `0x1C` | `0x100E` | `0x100E` | **MATCH** |
+| `VolCellRCV` | `0x20` | `0x1010` | `0x1010` | **MATCH** |
+| `VolCellRFV` | `0x24` | `0x1012` | `0x1012` | **MATCH** |
+| `VolSysPwrOff` (= `power_off_voltage`) | `0x28` | `0x1014` | `0x1014` | **MATCH** |
+| `CurBatCOC` (= `max_charge_current`) | `0x2C` | `0x1016` | `0x1016` | **MATCH** |
+| `TIMBatCOCPDly` | `0x30` | `0x1018` | `0x1018` | **MATCH** |
+| `TIMBatCOCPRDly` | `0x34` | `0x101A` | `0x101A` | **MATCH** |
+| `CurBatDcOC` (= `max_discharge_current`) | `0x38` | `0x101C` | `0x101C` | **MATCH** |
+| `TIMBatDcOCPDly` | `0x3C` | `0x101E` | `0x101E` | **MATCH** |
+| `TIMBatDcOCPRDly` | `0x40` | `0x1020` | `0x1020` | **MATCH** |
+| `TIMBatSCPRDly` | `0x44` | `0x1022` | `0x1022` | **MATCH** |
+| `CurBalanMax` | `0x48` | `0x1024` | `0x1024` | **MATCH** |
+| **`TMPBatCOT` (Charge OTP)** | `0x4C` | **`0x1026`** | was `0x102A` | **FIXED** — labels were swapped with discharge |
+| **`TMPBatCOTPR` (Charge OTPR)** | `0x50` | **`0x1028`** | was `0x102C` | **FIXED** |
+| **`TMPBatDcOT` (Discharge OTP)** | `0x54` | **`0x102A`** | was `0x1026` | **FIXED** |
+| **`TMPBatDcOTPR` (Discharge OTPR)** | `0x58` | **`0x102C`** | was `0x1028` | **FIXED** |
+| `TMPBatCUT` (Charge UTP) | `0x5C` | `0x102E` | `0x102E` | **MATCH** |
+| `TMPBatCUTPR` (Charge UTPR) | `0x60` | `0x1030` | `0x1030` | **MATCH** |
+| `TMPMosOT` | `0x64` | `0x1032` | `0x1032` | **MATCH** |
+| `TMPMosOTPR` | `0x68` | `0x1034` | `0x1034` | **MATCH** |
+| `CellCount` | `0x6C` | `0x1036` | `0x1036` | **MATCH** |
+| `BatChargeEN` (BOOL) | `0x70` | `0x1038` | **RESTORED** — wrongly removed in PR #3 |
+| `BatDisChargeEN` (BOOL) | `0x74` | `0x103A` | **RESTORED** |
+| `BalanEN` (BOOL) | `0x78` | `0x103C` | **RESTORED** |
+| `CapBatCell` (`pack_capacity_setting`) | `0x7C` | `0x103E` | `0x103E` | **MATCH** |
+| `SCPDelay` (μs) | `0x80` | `0x1040` | `0x1040` | **MATCH** |
+| `VolStartBalan` | `0x84` | `0x1042` | `0x1042` | **MATCH** |
+| `CellConWireRes[0..31]` (μΩ writable) | `0x88..0x104` | `0x1044..0x1082` | — | **NOT EXPOSED** — 32 entities of low value to typical HA users; skip until requested |
+| `DevAddr` | `0x108` | `0x1084` | — | **NOT EXPOSED** — matches the user's `bms_ids` config; redundant |
+| `TIMProdischarge` | `0x10C` | `0x1086` | — | **NOT EXPOSED** — niche; skip until requested |
+| packed-bit register | `0x114` | `0x108A` | was `0x1114` | **FIXED** to spec address |
+| `TIMSmartSleep` (UINT8 hours) | `0x118` | `0x108C` | — | **NOT EXPOSED** — niche |
 
-The four-byte gap before `0x103E` (`0x1038..0x103D` reading `0x0001` three
-times) is probably the three single-byte mode flags (Li-ion / LiFePO₄ / LTO
-chemistry select), but we can't confidently name them from one capture and
-they should not be writable until verified.
+## Packed-bit register (UINT16 at `0x108A`)
 
-## Packed-bit register `0x1114` = `0x3200`
+V1.1 bit positions (V1.0 only had bits 0–6):
 
-App toggles that are ON: `Charge`, `Discharge`, `Balance`, `Charging Float Mode`,
-`Discharge OCP 2`, `Discharge OCP 3`. The current value `0x3200` = `0011 0010 0000 0000` —
-bits 9, 12, 13 set.
+| Bit | Mask | Spec name | Impl entity | Status |
+|---|---|---|---|---|
+| 0 | `0x0001` | `HeatEN` | — | not exposed (heating not yet validated end-to-end) |
+| 1 | `0x0002` | Disable temp-sensor | — | not exposed |
+| 2 | `0x0004` | GPS Heartbeat | — | not exposed |
+| 3 | `0x0008` | Port Switch (RS485 / CAN) | — | not exposed |
+| 4 | `0x0010` | LCD Always On | — | not exposed |
+| 5 | `0x0020` | Special Charger | — | not exposed |
+| 6 | `0x0040` | `SmartSleep` | `smart_sleep_switch` | **MATCH** |
+| 7 | `0x0080` | `DisablePCLModule` | `disable_pcl_module_switch` | **MATCH** (V1.1 only) |
+| 8 | `0x0100` | `TimedStoredData` | `timed_stored_data_switch` | **FIXED** — was `0x0020` (Special Charger) |
+| 9 | `0x0200` | `ChargingFloatMode` | — | not exposed |
 
-Our table reads bits 5, 6, 7 (`mask 0x0020 / 0x0040 / 0x0080`) and reports all
-three as OFF. The app's `Timed Stored Data` toggle (which our `0x0020` bit was
-supposed to be) is genuinely OFF, so we can't disprove our mapping from this
-capture — but we can't prove it either. **SUSPECT — disable until verified.**
+## Static info block @ `0x1400`
 
----
+| Field | Spec byte | Spec reg | Impl offset | Verdict |
+|---|---|---|---|---|
+| `ManufacturerDeviceID` (16 ASCII) | `0x00` | `0x1400..0x1407` | `0x00` | **MATCH** |
+| `HardwareVersion` (8 ASCII) | `0x10` | `0x1408..0x140B` | `0x08` | **MATCH** |
+| `SoftwareVersion` (8 ASCII) | `0x18` | `0x140C..0x140F` | `0x0C` | **MATCH** |
+| `ODDRunTime` (s, UINT32) | `0x20` | `0x1410..0x1411` | — | **NOT EXPOSED** — duplicates the RT-block `RunTime` |
+| `PWROnTimes` (UINT32) | `0x24` | `0x1412..0x1413` | — | **NOT EXPOSED** — niche |
+| serial-number-like ASCII | — | `0x1414..` | `0x28` | **FW-EXTENSION** — not in V1.1 spec; present on PB2A16S20P; kept as `serial_number` |
 
-## Summary of action items
+## What this audit closes
 
-1. **Cell resistance offset wrong** → move from `0x80` to `0x25` (block A).
-   Verified to the byte with all 16 cells.
-2. **Probes 3/4/5 offset wrong** → move from `0x7C/D/E` to `0xF4/F5/F6`
-   (block C). Pre-existing bug since the protocol pivot; matches probes T4/T5
-   in the app to within display precision.
-3. **Every writable setting address wrong** — re-derived above, every line
-   matches the app one-to-one. **Until this is fixed, writes must be blocked
-   entirely** (or at least the safety tier) — currently they would write to
-   the wrong register, with worst-case safety impact.
-4. **Current encoding wrong** — `max_charge_current`, `max_discharge_current`,
-   `max_balance_current` are `U32_MILLI` (mA) not `U32_DECI` (deci-A).
-5. **`charge_status` offset wrong** → unknown actual location. Mark
-   speculative and hide from HA by default.
-6. **Heating fields** → values match (both zero) but can't prove offset.
-   Mark speculative.
-7. **Packed-bit positions** → can't prove from this capture. Mark speculative.
-8. **New entities to add (verified by app data)**:
-   - `discharge_overcurrent_protection_delay` @ `0x101E`
-   - `discharge_overcurrent_protection_recovery_time` @ `0x1020`
-   - `short_circuit_protection_delay_us` @ `0x1040`
-   - `short_circuit_protection_recovery_time` @ `0x1022`
-   - `nominal_capacity_ah` writable @ `0x103E`
-9. **`cell_resistances_ohm` semantic** — the BMS internally calls these
-   *"Cells Wire Resistance"*, which is a connection resistance, **not** an
-   internal cell resistance. The current entity name `Cell_<n>_ohm` is OK as
-   a unit but the description should clarify.
+- **Safety-relevant**: the charge / discharge OTP labels were swapped, meaning a
+  user enabling safety writes to change the discharge over-temp would have
+  written to the charge over-temp register and vice versa. Hardware capture
+  showed identical values (`70/60 °C` on both sides) so the bug was invisible
+  to value cross-checks; only the spec disambiguates them.
+- **Functional regression from PR #3**: `BatChargeEN` / `BatDisChargeEN` /
+  `BalanEN` are documented in both V1.0 and V1.1 at `0x1038`/`0x103A`/`0x103C`
+  with `1=open, 0=close` boolean semantics. PR #3 removed them on the
+  incorrect assumption that they had no Modbus address. Hardware capture
+  confirms all three read `1` (matching app `Charge ON / Discharge ON /
+  Balance ON`).
+- **Packed-bit register**: location now matches V1.1 spec; the `timed_stored_data_switch`
+  mask now points at the correct bit (BIT8, not BIT5/Special-Charger).
+- **Speculative real-time fields removed**: `charge_status` / `charge_status_time` /
+  `heating_active` / `heating_current` had ad-hoc offsets with no spec
+  backing. `heating_active` / `heating_current` are re-mapped to the spec'd
+  locations (still hidden behind `debug_unverified_fields` because we have
+  no hardware sample with the heater running). `charge_status*` removed
+  entirely (BLE-only field).

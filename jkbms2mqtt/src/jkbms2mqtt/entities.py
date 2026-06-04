@@ -299,30 +299,8 @@ LIVE_SENSORS: Final[tuple[ReadOnlyEntity, ...]] = (
         description="Current drawn by the heating element (PB-series only).",
         verified=False,
     ),
-    ReadOnlyEntity(
-        object_id="charge_status",
-        topic_suffix="charge_status",
-        source_field="charge_status",
-        component=Component.SENSOR,
-        device_class=None,
-        state_class=None,
-        unit_of_measurement=None,
-        decimals=None,
-        description="Charge FSM state (standby / bulk / absorption / float).",
-        verified=False,
-    ),
-    ReadOnlyEntity(
-        object_id="charge_status_time",
-        topic_suffix="charge_status_time",
-        source_field="charge_status_time_s",
-        component=Component.SENSOR,
-        device_class="duration",
-        state_class="measurement",
-        unit_of_measurement="s",
-        decimals=0,
-        description="Seconds spent in the current charge FSM state.",
-        verified=False,
-    ),
+    # charge_status / charge_status_time removed: not present in V1.0/V1.1 spec.
+    # The BMS app's "Bulk/Float" state comes from the BLE protocol, not Modbus.
     ReadOnlyEntity(
         object_id="alarm_bits",
         topic_suffix="alarm_bits",
