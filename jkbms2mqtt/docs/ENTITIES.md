@@ -15,7 +15,7 @@ device page sorts it into one of four sections:
 | Section | `entity_category` | Used for |
 |---|---|---|
 | **Sensors** | (none) | Primary read-only telemetry — the values you check on the device page every day |
-| **Controls** | (none) | Primary on/off switches (charging / discharging / balance, when basic writes are enabled) |
+| **Controls** | (none) | A writable entity with no category. Currently empty: the charging / discharging / balance switches are spec-defined configuration parameters (they tune device behaviour rather than being the pack's main power switch), so they land under **Configuration** instead. |
 | **Configuration** | `config` | Every writable setting + every packed-bit mode toggle; settable thresholds, current limits, OTP / UTP thresholds, etc. When the tier is off the entity is published read-only — but still categorised as Configuration. |
 | **Diagnostics** | `diagnostic` | Read-only debug / lifetime / static info: model, hw, sw, serial number, cycle count, cycle capacity, runtime, SoH, raw alarm bitmap, present cell count, per-cell internal resistances |
 

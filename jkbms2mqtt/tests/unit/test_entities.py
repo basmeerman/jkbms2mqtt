@@ -13,6 +13,7 @@ from jkbms2mqtt.entities import (
     LIVE_SENSORS,
     PACKED_BIT_ENTITIES,
     WRITABLE_ENTITIES,
+    Component,
     ReadOnlyEntity,
     all_read_only_entities,
     expand_cell_entities,
@@ -123,6 +124,113 @@ class TestWritables:
         assert "control/max_charge_current/set" in lookup
         assert "control/smart_sleep_voltage/set" in lookup
         assert "control/smart_sleep_switch/set" in lookup
+
+    def test_writable_lookup_maps_to_the_actual_entities(self) -> None:
+        """The router dispatches on these objects, so the values must be the
+        exact entities — not None or the wrong one."""
+        lookup = writable_by_command_topic_suffix()
+        for w in WRITABLE_ENTITIES:
+            assert lookup[f"{w.topic_suffix}/set"] is w
+        for p in PACKED_BIT_ENTITIES:
+            assert lookup[f"{p.topic_suffix}/set"] is p
+        # Every entry is keyed off a /set topic and nothing else leaks in.
+        assert all(key.endswith("/set") for key in lookup)
+        assert len(lookup) == len(WRITABLE_ENTITIES) + len(PACKED_BIT_ENTITIES)
+
+
+class TestCellEntityFields:
+    """Pin every field `expand_cell_entities` builds — these are the entities HA
+    renders per cell, and a wrong unit / source_field / category misreports."""
+
+    def test_voltage_entity_all_fields(self) -> None:
+        # n=2 so the n-1 index (→ [1]) is distinguishable from n.
+        volt = next(c for c in expand_cell_entities(3) if c.object_id == "cell_2_volt")
+        assert volt.topic_suffix == "Cell_2_volt"
+        assert volt.source_field == "cell_voltages_v[1]"
+        assert volt.component is Component.SENSOR
+        assert volt.device_class == "voltage"
+        assert volt.state_class == "measurement"
+        assert volt.unit_of_measurement == "V"
+        assert volt.decimals == 3
+        assert volt.description == "Cell 2 voltage."
+        assert volt.entity_category is None  # per-cell voltage is primary
+
+    def test_resistance_entity_all_fields(self) -> None:
+        ohm = next(c for c in expand_cell_entities(3) if c.object_id == "cell_2_ohm")
+        assert ohm.topic_suffix == "Cell_2_ohm"
+        assert ohm.source_field == "cell_resistances_ohm[1]"
+        assert ohm.component is Component.SENSOR
+        assert ohm.device_class is None
+        assert ohm.state_class == "measurement"
+        assert ohm.unit_of_measurement == "Ω"
+        assert ohm.decimals == 3
+        assert ohm.description == "Cell 2 internal resistance."
+        assert ohm.entity_category == "diagnostic"
+
+    def test_source_field_index_is_zero_based(self) -> None:
+        cells = {c.object_id: c for c in expand_cell_entities(2)}
+        assert cells["cell_1_volt"].source_field == "cell_voltages_v[0]"
+        assert cells["cell_1_ohm"].source_field == "cell_resistances_ohm[0]"
+
+
+class TestWritableConstructors:
+    """`_writable_from_register` / `_writable_from_packed_bit` build the writable
+    table; assert every field they set."""
+
+    def _reg(self, name, encoding):  # test helper — builds a RegisterDef
+        from jkbms2mqtt.protocol.jk_settings import RegisterDef, WriteTier
+
+        return RegisterDef(
+            name=name,
+            address=0x1000,
+            encoding=encoding,
+            min_value=0,
+            max_value=10,
+            step=1,
+            unit="A",
+            tier=WriteTier.BASIC,
+            description=f"{name} description.",
+        )
+
+    def test_from_register_numeric(self) -> None:
+        from jkbms2mqtt.entities import Component, _writable_from_register
+        from jkbms2mqtt.protocol.jk_settings import Encoding
+
+        reg = self._reg("max_charge_current", Encoding.U32_MILLI)
+        w = _writable_from_register(reg)
+        assert w.object_id == "max_charge_current"
+        assert w.topic_suffix == "control/max_charge_current"
+        assert w.register is reg
+        assert w.component is Component.NUMBER
+        assert w.description == "max_charge_current description."
+        assert w.entity_category == "config"
+
+    def test_from_register_bool_is_switch(self) -> None:
+        from jkbms2mqtt.entities import Component, _writable_from_register
+        from jkbms2mqtt.protocol.jk_settings import Encoding
+
+        reg = self._reg("charging_switch", Encoding.BOOL32)
+        w = _writable_from_register(reg)
+        assert w.component is Component.SWITCH
+
+    def test_from_packed_bit_all_fields(self) -> None:
+        from jkbms2mqtt.entities import Component, _writable_from_packed_bit
+        from jkbms2mqtt.protocol.jk_settings import PackedBitDef, WriteTier
+
+        bit = PackedBitDef(
+            name="smart_sleep_switch",
+            register=0x1114,
+            bit_mask=0x0002,
+            tier=WriteTier.BASIC,
+            description="smart sleep.",
+        )
+        p = _writable_from_packed_bit(bit)
+        assert p.object_id == "smart_sleep_switch"
+        assert p.topic_suffix == "control/smart_sleep_switch"
+        assert p.bit is bit
+        assert p.verified is False  # bit positions unconfirmed → hidden by default
+        assert p.component is Component.SWITCH
+        assert p.entity_category == "config"
 
 
 class TestEntityCategories:
