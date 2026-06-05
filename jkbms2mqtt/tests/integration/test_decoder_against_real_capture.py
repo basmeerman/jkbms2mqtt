@@ -202,6 +202,16 @@ class TestRealtimeAnchors:
         assert live.charge_enabled is True
         assert live.discharge_enabled is True
 
+    def test_heating_active_decoded_from_low_byte(self, rt_buffer: list[int]) -> None:
+        """Capture has reg 0x1268 = 0xFF00 — Heating is the low byte.
+
+        High byte (0xFF) is TempSensorAbsent (all sensors normal). Low byte
+        (0x00) is the Heating status. The app at capture time showed
+        'Heating Status: OFF'. Locks the fix from the BMS_1 sweep.
+        """
+        live = decode_realtime(rt_buffer)
+        assert live.heating_active is False
+
     def test_no_alarms(self, rt_buffer: list[int]) -> None:
         live = decode_realtime(rt_buffer)
         assert live.alarm_bits == 0
@@ -315,6 +325,17 @@ def test_packed_bit_register_value(packed_bit_value: int) -> None:
     "Discharge OCP 2" / "Discharge OCP 3" — not documented in V1.1 spec.
     """
     assert packed_bit_value == 0x3200
+
+
+def test_packed_bit_register_address_matches_empirical_0x1114() -> None:
+    """PB2A16S20P firmware deviation locked in.
+
+    Spec V1.1 says byte 0x114 → reg 0x108A. PB2A16S20P returns 0x0000 at
+    0x108A but the same bit pattern at 0x1114 (verified against the BLE
+    app's Control tab). The production decoder uses the empirical address.
+    """
+    from jkbms2mqtt.protocol.jk_settings import PACKED_BIT_REGISTER
+    assert PACKED_BIT_REGISTER == 0x1114
 
 
 def test_packed_bit_decodes_per_spec_v11_positions() -> None:

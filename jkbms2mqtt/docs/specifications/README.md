@@ -40,16 +40,28 @@ the V1.1 spec for these fields — see `FIELD_AUDIT.md` for the evidence:
   (byte offsets `0xF8 / 0xFA / 0xFC`); on real hardware those words read zero
   and the actual temperatures appear at `0x12F4 / 0x12F5 / 0x12F6`. The
   decoder uses the empirical addresses with a `# SPEC-DEVIATION` comment.
-- **Packed-bit register** — spec says Modbus reg `0x108A` (byte offset `0x114`);
-  on real hardware the register also reads correctly at `0x1114` (likely a
-  firmware-side memory alias). The implementation reads the spec'd address by
-  default; both interpretations decode `0x3200 → ChargingFloatMode = ON` for
-  the captured fixture.
+- **Packed-bit register** — spec V1.1 places this at byte offset `0x114` in
+  the settings block, which maps to Modbus reg `0x108A` under the spec's
+  byte→register convention. On PB2A16S20P firmware 15.41, reg `0x108A`
+  returns `0x0000` (no bits set) while the BMS app's Control tab shows
+  `Charging Float Mode`, `Discharge OCP 2`, `Discharge OCP 3` all ON. Reg
+  `0x1114` returns `0x3200` — bits 9 / 12 / 13 — which matches the three
+  ON toggles. The decoder uses the empirical address `0x1114` with a
+  `# SPEC-DEVIATION` annotation. Bits 12 / 13 are not documented in V1.1
+  but consistently map to `Discharge OCP 2 / 3`.
 - **`charge_status` FSM state** (Stand-by / Bulk / Absorption / Float) shown by
   the BMS app is **not** documented in V1.1 or V1.0 RS485 Modbus. It is
   reachable via the BLE / UART-TTL proprietary protocol but not exposed at any
   Modbus register address the audit could verify. Removed from the entity
-  table.
+  table. Confirmed again in the BMS_1 full sweep (capture `BMS_1_sweep.txt`,
+  BLE app showed `Charge Status: Abs`, `Charge Status Time: 320s`; neither
+  value appears in any Modbus register read).
+
+- **Heating bit** at spec V1.1 reg `0x1268` is the **low** byte (Modbus
+  big-endian); the high byte is `TempSensorAbsent`. The full sweep confirmed
+  reg `0x1268 = 0xFF00`, with the app's `Heating Status: OFF` matching the
+  low byte `0x00`. The previous decoder used the high byte and consequently
+  reported `heating_active = True` even when the heater was off.
 
 ## Licensing
 

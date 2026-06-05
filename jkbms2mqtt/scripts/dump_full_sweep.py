@@ -70,10 +70,13 @@ PLAN: list[Chunk] = [
     # ---- Settings 0x1000..0x108D ----
     Chunk("SETTINGS_A", 0x1000, 120, purpose="settings 0x1000..0x1077"),
     Chunk("SETTINGS_B", 0x1078, 22, purpose="settings 0x1078..0x108D incl. packed bit"),
-    # ---- Real-time 0x1200..0x130F ----
+    # ---- Real-time 0x1200..0x12FF ----
+    # Block sizes match the production decoder's BLOCK_A/B/C_COUNT. Asking
+    # for more than this returns Modbus illegal-data-address on PB2A16S20P
+    # because the request crosses into an unmapped region.
     Chunk("RT_A", 0x1200, 120, purpose="cells, V/I/P, SoC, temps, alarms"),
-    Chunk("RT_B", 0x1278, 120, purpose="RT continuation, mirror region"),
-    Chunk("RT_C", 0x12F0, 32, purpose="probes 3/4/5 (PB2A16S20P firmware deviation)"),
+    Chunk("RT_B", 0x1278, 50, purpose="RT continuation"),
+    Chunk("RT_C", 0x12F0, 16, purpose="probes 3/4/5 (PB2A16S20P firmware deviation)"),
     # ---- Info 0x1400..0x150F ----
     Chunk("INFO_A", 0x1400, 120, purpose="model/fw/sw/serial + V1.1 host config"),
     Chunk("INFO_B", 0x1478, 60, purpose="info continuation incl. RCVTime/RFVTime"),
@@ -246,14 +249,27 @@ async def main() -> int:
                 settings_buf[off + i] = v
                 settings_read.add(c.address + i)
 
-    # Packed-bit and TIMSmartSleep live just past the settings block — read individually
-    print("\n# Probing packed-bit register at spec address 0x108A")
-    pkt = await read_chunk(client, Chunk("PACKED_BIT", PACKED_BIT_REGISTER, 1,
-                                         purpose="V1.1 packed-bit per spec"),
-                           args.slave_id)
-    if pkt is not None:
-        hex_dump("PACKED_BIT @ 0x108A", PACKED_BIT_REGISTER, pkt)
-        packed_bit_value = pkt[0]
+    # Packed-bit register. Probe both the spec-derived address (0x108A) AND
+    # the empirical PB2A16S20P address (0x1114) so we can compare on any
+    # firmware. The production code uses whichever PACKED_BIT_REGISTER points
+    # at — currently the empirical address for PB2A16S20P compatibility.
+    print("\n# Probing packed-bit register at spec address 0x108A and empirical 0x1114")
+    spec_probe = await read_chunk(client, Chunk(
+        "PACKED_BIT_SPEC", 0x108A, 1, purpose="V1.1 spec-derived address"
+    ), args.slave_id)
+    if spec_probe is not None:
+        hex_dump("PACKED_BIT_SPEC @ 0x108A", 0x108A, spec_probe)
+    empirical_probe = await read_chunk(client, Chunk(
+        "PACKED_BIT_EMPIRICAL", 0x1114, 1, purpose="PB2A16S20P empirical address"
+    ), args.slave_id)
+    if empirical_probe is not None:
+        hex_dump("PACKED_BIT_EMPIRICAL @ 0x1114", 0x1114, empirical_probe)
+    # Use whichever address the production code is configured for.
+    chosen = await read_chunk(client, Chunk(
+        "PACKED_BIT", PACKED_BIT_REGISTER, 1, purpose="production decoder address"
+    ), args.slave_id)
+    if chosen is not None:
+        packed_bit_value = chosen[0]
 
     print("\n## Decoded settings (spec V1.1)")
     decode_settings_summary(settings_buf, settings_read)

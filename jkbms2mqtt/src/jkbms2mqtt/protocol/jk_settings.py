@@ -140,20 +140,30 @@ SAFETY_REGISTERS: Final[tuple[RegisterDef, ...]] = (
 
 
 
-# -- Packed-bit register at 0x108A ------------------------------------------------------
-# Spec V1.1 places this UINT16 at byte offset 0x114 in the settings block —
-# Modbus reg 0x1000 + 0x114/2 = 0x108A. PR #3 used the empirical alias 0x1114
-# which happened to return matching data on PB2A16S20P (likely firmware-side
-# memory mirror), but the spec'd address is the canonical one.
+# -- Packed-bit register — SPEC-DEVIATION on PB2A16S20P --------------------------------
+# Spec V1.1 places this UINT16 at byte offset 0x114 in the settings block
+# under the spec's byte→register convention, which maps to Modbus reg 0x108A
+# (= 0x1000 + 0x114/2). On PB2A16S20P firmware 15.41 we verified that
+# 0x108A reads 0x0000 (no bits set) while the BMS app's Control tab shows
+# ChargingFloatMode / Discharge OCP 2 / Discharge OCP 3 ON. The empirical
+# register 0x1114 (where the spec byte offset 0x114 is treated as a register
+# index instead of a byte index — same direct-address mapping the firmware
+# also uses for TempBat3/4/5 in the RT block) reads 0x3200 = bits 9, 12, 13,
+# which matches the three ON toggles. So on this firmware the packed-bit
+# register lives at 0x1114; we use that address with a SPEC-DEVIATION
+# annotation.
+#
 # Bit positions per V1.1 spec page 3:
-#   BIT0 HeatEN          BIT5 SpecialCharger
+#   BIT0 HeatEN            BIT5 SpecialCharger
 #   BIT1 DisableTempSensor BIT6 SmartSleep
-#   BIT2 GPSHeartbeat    BIT7 DisablePCLModule  (V1.1)
-#   BIT3 PortSwitch      BIT8 TimedStoredData   (V1.1)
-#   BIT4 LCDAlwaysOn     BIT9 ChargingFloatMode (V1.1)
+#   BIT2 GPSHeartbeat      BIT7 DisablePCLModule  (V1.1)
+#   BIT3 PortSwitch        BIT8 TimedStoredData   (V1.1)
+#   BIT4 LCDAlwaysOn       BIT9 ChargingFloatMode (V1.1)
+# Bits 10+ are not documented in the V1.1 PDF but bits 12 and 13 are
+# observed on PB2A16S20P, corresponding to the app's Discharge OCP 2 / 3.
 # V1.0 only documents BIT0–6.
 
-PACKED_BIT_REGISTER: Final = 0x108A
+PACKED_BIT_REGISTER: Final = 0x1114    # SPEC-DEVIATION — spec says 0x108A
 
 PACKED_BITS: Final[tuple[PackedBitDef, ...]] = (
     PackedBitDef(name="smart_sleep_switch", register=PACKED_BIT_REGISTER, bit_mask=0x0040, tier=WriteTier.BASIC, description="Enable smart-sleep behaviour."),

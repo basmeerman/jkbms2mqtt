@@ -292,10 +292,14 @@ def decode_realtime(regs: list[int]) -> JkRealtime:
         if alarm_bits & (1 << i)
     )
 
-    # Spec V1.1: byte 0xD0/0xD1 is a packed UINT16. Low byte = temp-sensor
-    # absent bitmap. High byte = Heating status (1=on / 0=off).
+    # Spec V1.1 reg 0x1268 (byte 0xD0..0xD1): byte 0 = TempSensorAbsent
+    # bitmap (bits 0..5 for MOS/BAT1..5), byte 1 = Heating status (1=on,
+    # 0=off). In Modbus big-endian-word order, byte 0 is the HIGH byte and
+    # byte 1 is the LOW byte. Verified against BLE app on BMS_1: capture has
+    # 0xFF00 here (TempSensors all normal, Heating OFF), and the app
+    # consistently shows "Heating Status: OFF".
     temp_heat_word = _u16(regs, _OFF_TEMP_SENSOR_HEATING)
-    heating_active = ((temp_heat_word >> 8) & 0xFF) != 0
+    heating_active = (temp_heat_word & 0xFF) != 0
 
     return JkRealtime(
         cell_voltages_v=tuple(cells),
