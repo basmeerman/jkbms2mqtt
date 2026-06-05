@@ -125,6 +125,92 @@ class TestWritables:
         assert "control/smart_sleep_switch/set" in lookup
 
 
+class TestEntityCategories:
+    """HA `entity_category` invariants — see docs/ENTITIES.md and report
+    `https://developers.home-assistant.io/docs/core/entity/#categorizing-entities`.
+    """
+
+    def test_every_writable_is_config(self) -> None:
+        """Settable thresholds belong in HA's Configuration section."""
+        for w in WRITABLE_ENTITIES:
+            assert w.entity_category == "config", (
+                f"{w.object_id} should be entity_category='config'"
+            )
+
+    def test_every_packed_bit_is_config(self) -> None:
+        """Device-mode toggles belong in HA's Configuration section."""
+        for p in PACKED_BIT_ENTITIES:
+            assert p.entity_category == "config", (
+                f"{p.object_id} should be entity_category='config'"
+            )
+
+    def test_static_info_is_diagnostic(self) -> None:
+        """Model / hw / sw / serial belong in HA's Diagnostics section."""
+        for e in FIXED_SENSORS:
+            assert e.entity_category == "diagnostic", (
+                f"{e.object_id} should be entity_category='diagnostic'"
+            )
+
+    def test_lifetime_counters_are_diagnostic(self) -> None:
+        by_id = {e.object_id: e for e in LIVE_SENSORS}
+        for name in ("cycle_count", "total_cycle_capacity_ah", "total_runtime"):
+            assert by_id[name].entity_category == "diagnostic", (
+                f"{name} should be entity_category='diagnostic'"
+            )
+
+    def test_soh_is_diagnostic(self) -> None:
+        by_id = {e.object_id: e for e in LIVE_SENSORS}
+        assert by_id["soh_percentage"].entity_category == "diagnostic"
+
+    def test_alarm_bits_diagnostic_alarms_primary(self) -> None:
+        """`alarm_bits` (raw bitfield) is diagnostic; `alarms` (decoded text)
+        is the primary "is there a problem" entity."""
+        by_id = {e.object_id: e for e in LIVE_SENSORS}
+        assert by_id["alarm_bits"].entity_category == "diagnostic"
+        assert by_id["alarms"].entity_category is None
+
+    def test_present_cell_count_is_diagnostic(self) -> None:
+        by_id = {e.object_id: e for e in CELL_STATS_SENSORS}
+        assert by_id["present_cell_count"].entity_category == "diagnostic"
+
+    def test_per_cell_voltages_primary_resistances_diagnostic(self) -> None:
+        from jkbms2mqtt.entities import expand_cell_entities
+        cells = expand_cell_entities(2)
+        by_id = {e.object_id: e for e in cells}
+        assert by_id["cell_1_volt"].entity_category is None
+        assert by_id["cell_2_volt"].entity_category is None
+        assert by_id["cell_1_ohm"].entity_category == "diagnostic"
+        assert by_id["cell_2_ohm"].entity_category == "diagnostic"
+
+    def test_main_primary_sensors_have_no_category(self) -> None:
+        """Total V/I/P, SoC, capacities, balance, temps, charge/discharge
+        switch states are daily-use → no entity_category."""
+        by_id = {e.object_id: e for e in LIVE_SENSORS}
+        for name in (
+            "total_voltage", "total_current", "total_power",
+            "soc_percentage",
+            "remaining_capacity_ah", "nominal_capacity_ah",
+            "balance_current",
+            "mos_temp", "probe_1_temp", "probe_2_temp",
+            "probe_3_temp", "probe_4_temp", "probe_5_temp",
+        ):
+            assert by_id[name].entity_category is None, (
+                f"{name} should NOT have entity_category set (primary entity)"
+            )
+
+    def test_no_invalid_category_string(self) -> None:
+        """HA only accepts None / 'config' / 'diagnostic'."""
+        valid = {None, "config", "diagnostic"}
+        for e in (
+            LIVE_SENSORS + LIVE_BINARY_SENSORS + CELL_STATS_SENSORS + FIXED_SENSORS
+        ):
+            assert e.entity_category in valid, e.object_id
+        for w in WRITABLE_ENTITIES:
+            assert w.entity_category in valid, w.object_id
+        for p in PACKED_BIT_ENTITIES:
+            assert p.entity_category in valid, p.object_id
+
+
 class TestCoverage:
     def test_critical_fields_have_entities(self) -> None:
         live_sources = {e.source_field for e in LIVE_SENSORS + LIVE_BINARY_SENSORS}

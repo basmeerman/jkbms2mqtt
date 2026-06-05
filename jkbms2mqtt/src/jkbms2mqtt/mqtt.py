@@ -109,6 +109,8 @@ def discovery_for_read_only(
     if entity.component is Component.BINARY_SENSOR:
         payload["payload_on"] = "ON"
         payload["payload_off"] = "OFF"
+    if entity.entity_category is not None:
+        payload["entity_category"] = entity.entity_category
     return DiscoveryMessage(
         topic=_discovery_topic(discovery_prefix, entity.component, bms_name, entity.object_id),
         payload=payload,
@@ -158,6 +160,8 @@ def discovery_for_writable(
     if component is Component.SWITCH:
         payload["state_on"] = "ON"
         payload["state_off"] = "OFF"
+    if entity.entity_category is not None:
+        payload["entity_category"] = entity.entity_category
     return DiscoveryMessage(
         topic=_discovery_topic(discovery_prefix, component, bms_name, entity.object_id),
         payload=payload,
@@ -183,6 +187,8 @@ def discovery_for_packed_bit(
         payload["command_topic"] = _command_topic(bms_name, entity.topic_suffix)
         payload["state_on"] = "ON"
         payload["state_off"] = "OFF"
+    if entity.entity_category is not None:
+        payload["entity_category"] = entity.entity_category
     return DiscoveryMessage(
         topic=_discovery_topic(discovery_prefix, component, bms_name, entity.object_id),
         payload=payload,
