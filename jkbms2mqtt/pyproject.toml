@@ -111,6 +111,23 @@ warn_unreachable = true
 disallow_any_unimported = true
 pretty = true
 
+# mutmut 3.x config (TOML arrays, not the 2.x comma-strings). Test selection is
+# the unit + property suites (integration tests aren't useful for mutation and
+# are slower); mutmut 3.x runs pytest in-process and is coverage-guided.
 [tool.mutmut]
-paths_to_mutate = "src/jkbms2mqtt/protocol/,src/jkbms2mqtt/entities.py"
-runner = "python -m pytest -x --no-header -q tests/unit tests/property"
+paths_to_mutate = [
+    "src/jkbms2mqtt/protocol/",
+    "src/jkbms2mqtt/entities.py",
+]
+# Copy the whole package into the mutants sandbox so sibling modules (app, mqtt,
+# config, …) that the tests import resolve — paths_to_mutate alone only copies
+# what it mutates, breaking those imports. create_mutants runs after this copy,
+# so the mutated protocol/entities files still take precedence.
+also_copy = [
+    "src/jkbms2mqtt/",
+    "scripts/",
+]
+tests_dir = [
+    "tests/unit",
+    "tests/property",
+]

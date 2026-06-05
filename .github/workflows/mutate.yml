@@ -18,25 +18,29 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: jkbms2mqtt/pyproject.toml
       - run: pip install -e ".[dev]"
 
-      - name: Mutate protocol package (≥90% kill rate required)
+      # One mutmut run mutates both packages (paths_to_mutate in pyproject.toml);
+      # the per-package gates below split the results by mutant-name prefix.
+      - name: Run mutation testing
         run: |
-          # mutmut returns non-zero when any mutant survived/timed-out; suppress
-          # so we can run the gate parser ourselves.
-          mutmut run --paths-to-mutate src/jkbms2mqtt/protocol/ || true
-          mutmut junitxml > mutmut-protocol.xml
-          python scripts/check_kill_rate.py mutmut-protocol.xml --min 0.90 --label protocol
+          # mutmut returns non-zero when any mutant survives; suppress so we can
+          # run the gate parsers ourselves.
+          mutmut run || true
+          mutmut results --all true > mutmut-results.txt
 
-      - name: Mutate entities (≥80% kill rate)
+      - name: Gate protocol package (≥90% kill rate required)
         run: |
-          rm -rf .mutmut-cache
-          mutmut run --paths-to-mutate src/jkbms2mqtt/entities.py || true
-          mutmut junitxml > mutmut-entities.xml
-          python scripts/check_kill_rate.py mutmut-entities.xml --min 0.80 --label entities
+          python scripts/check_kill_rate.py mutmut-results.txt \
+            --min 0.90 --select .protocol. --label protocol --show-survivors
+
+      - name: Gate entities (≥80% kill rate required)
+        run: |
+          python scripts/check_kill_rate.py mutmut-results.txt \
+            --min 0.80 --select .entities. --label entities --show-survivors

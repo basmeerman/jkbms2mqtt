@@ -271,6 +271,83 @@ class TestDiscoveryPayloads:
         assert msg.topic.startswith("homeassistant/binary_sensor/BMS_1_device_")
         assert "command_topic" not in msg.payload
 
+    def test_entity_category_emitted_for_diagnostic_sensor(self) -> None:
+        from jkbms2mqtt.entities import FIXED_SENSORS
+        e = next(x for x in FIXED_SENSORS if x.object_id == "bms_model")
+        msg = discovery_for_read_only(e, "BMS_1", discovery_prefix="homeassistant")
+        assert msg.payload["entity_category"] == "diagnostic"
+
+    def test_entity_category_omitted_for_primary_sensor(self) -> None:
+        e = next(x for x in LIVE_SENSORS if x.object_id == "total_voltage")
+        msg = discovery_for_read_only(e, "BMS_1", discovery_prefix="homeassistant")
+        assert "entity_category" not in msg.payload
+
+    def test_entity_category_emitted_for_writable_number(self) -> None:
+        w = next(x for x in WRITABLE_ENTITIES if x.object_id == "max_charge_current")
+        msg = discovery_for_writable(
+            w, "BMS_1", discovery_prefix="homeassistant", writable=True
+        )
+        assert msg.payload["entity_category"] == "config"
+
+    def test_entity_category_emitted_for_writable_when_downgraded_to_sensor(self) -> None:
+        """When the tier is off the writable shows as a sensor, but
+        entity_category=config still applies."""
+        w = next(x for x in WRITABLE_ENTITIES if x.object_id == "max_charge_current")
+        msg = discovery_for_writable(
+            w, "BMS_1", discovery_prefix="homeassistant", writable=False
+        )
+        assert msg.payload["entity_category"] == "config"
+
+    def test_entity_category_emitted_for_packed_bit(self) -> None:
+        bit = PACKED_BIT_ENTITIES[0]
+        msg = discovery_for_packed_bit(
+            bit, "BMS_1", discovery_prefix="homeassistant", writable=True
+        )
+        assert msg.payload["entity_category"] == "config"
+
+    def test_entity_category_omitted_for_writable_without_category(self) -> None:
+        """Synthetic WritableEntity with entity_category=None — covers the
+        defensive branch in discovery_for_writable. No real writable currently
+        uses entity_category=None, but the path exists in case a future
+        register def needs to opt out (e.g. a primary on/off control)."""
+        from jkbms2mqtt.entities import Component, WritableEntity
+        from jkbms2mqtt.protocol.jk_settings import Encoding, RegisterDef, WriteTier
+        reg = RegisterDef(
+            name="primary_switch", address=0x1090, encoding=Encoding.BOOL32,
+            min_value=0, max_value=1, step=1, unit=None,
+            tier=WriteTier.BASIC, description="test primary switch",
+        )
+        w = WritableEntity(
+            object_id="primary_switch",
+            topic_suffix="control/primary_switch",
+            register=reg,
+            component=Component.SWITCH,
+            description="test",
+            entity_category=None,
+        )
+        msg = discovery_for_writable(
+            w, "BMS_1", discovery_prefix="homeassistant", writable=True
+        )
+        assert "entity_category" not in msg.payload
+
+    def test_entity_category_omitted_for_packed_bit_without_category(self) -> None:
+        from jkbms2mqtt.entities import PackedBitEntity
+        from jkbms2mqtt.protocol.jk_settings import PackedBitDef, WriteTier
+        bit_def = PackedBitDef(
+            name="primary_bit", register=0x1114, bit_mask=0x0001,
+            tier=WriteTier.BASIC, description="test",
+        )
+        p = PackedBitEntity(
+            object_id="primary_bit",
+            topic_suffix="control/primary_bit",
+            bit=bit_def,
+            entity_category=None,
+        )
+        msg = discovery_for_packed_bit(
+            p, "BMS_1", discovery_prefix="homeassistant", writable=True
+        )
+        assert "entity_category" not in msg.payload
+
     def test_render_returns_compact_json(self) -> None:
         e = next(x for x in LIVE_SENSORS if x.object_id == "soc_percentage")
         msg = discovery_for_read_only(e, "BMS_1", discovery_prefix="homeassistant")

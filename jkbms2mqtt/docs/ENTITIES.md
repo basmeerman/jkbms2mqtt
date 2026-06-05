@@ -1,10 +1,26 @@
 # Entity reference
 
 Every MQTT entity the add-on publishes for each BMS, with its topic, unit,
-display precision, and access state. Every register offset and encoding is
-calibrated against [`specifications/BMS.RS485.Modbus.V1.1.pdf`](specifications/BMS.RS485.Modbus.V1.1.pdf)
+display precision, access state, and the **HA device-page section** it lands
+in. Every register offset and encoding is calibrated against
+[`specifications/BMS.RS485.Modbus.V1.1.pdf`](specifications/BMS.RS485.Modbus.V1.1.pdf)
 (see [`specifications/README.md`](specifications/README.md)); deviations are
 documented in [`FIELD_AUDIT.md`](FIELD_AUDIT.md).
+
+## HA device-page sections
+
+Each entity is published with an `entity_category` so the Home Assistant
+device page sorts it into one of four sections:
+
+| Section | `entity_category` | Used for |
+|---|---|---|
+| **Sensors** | (none) | Primary read-only telemetry — the values you check on the device page every day |
+| **Controls** | (none) | A writable entity with no category. Currently empty: the charging / discharging / balance switches are spec-defined configuration parameters (they tune device behaviour rather than being the pack's main power switch), so they land under **Configuration** instead. |
+| **Configuration** | `config` | Every writable setting + every packed-bit mode toggle; settable thresholds, current limits, OTP / UTP thresholds, etc. When the tier is off the entity is published read-only — but still categorised as Configuration. |
+| **Diagnostics** | `diagnostic` | Read-only debug / lifetime / static info: model, hw, sw, serial number, cycle count, cycle capacity, runtime, SoH, raw alarm bitmap, present cell count, per-cell internal resistances |
+
+See HA's own definition at
+[developers.home-assistant.io/docs/core/entity/#categorizing-entities](https://developers.home-assistant.io/docs/core/entity/#categorizing-entities).
 
 ## Access states
 
@@ -34,68 +50,72 @@ commanding a new value posts to `<topic>/set`.
 
 ### Pack-level (live)
 
-| Topic suffix | Object id | Unit | Decimals | Description |
-|---|---|---|---|---|
-| `Total_Voltage_V` | `total_voltage` | V | 3 | Total pack voltage |
-| `Total_Current_A` | `total_current` | A | 3 | Pack current (signed; − = discharge) |
-| `Total_Power_W` | `total_power` | W | 1 | Pack power (signed) |
-| `SOC_percentage` | `soc_percentage` | % | 0 | State of charge |
-| `SOH_percentage` | `soh_percentage` | % | 0 | State of health |
-| `Remaining_Capacity_Ah` | `remaining_capacity_ah` | Ah | 2 | Remaining capacity |
-| `Battery_Capacity_Ah` | `nominal_capacity_ah` | Ah | 2 | Nominal capacity |
-| `Cycle_Count` | `cycle_count` | — | 0 | Charge-cycle count |
-| `Cycle_Capacity_Ah` | `total_cycle_capacity_ah` | Ah | 2 | Lifetime accumulated charge throughput |
-| `Total_runtime` | `total_runtime` | s | 0 | Time since BMS power-on |
-| `Balance_current` | `balance_current` | A | 3 | Cell-balance current |
-| `Mos_temp` | `mos_temp` | °C | 1 | MOSFET temperature |
-| `Probe_1_temp` … `Probe_5_temp` | `probe_1_temp` … `probe_5_temp` | °C | 1 | External probe temperatures |
-| `Heating_Current` ⚠ | `heating_current` | A | 3 | Heating-element current (spec V1.1 byte 0xE6 → reg 0x1273) — unverified |
-| `alarm_bits` | `alarm_bits` | — | 0 | Raw 32-bit alarm bitmap |
-| `alarms` | `alarms` | — | — | Active alarms, comma-separated |
+| Topic suffix | Object id | Unit | Decimals | HA section | Description |
+|---|---|---|---|---|---|
+| `Total_Voltage_V` | `total_voltage` | V | 3 | Sensors | Total pack voltage |
+| `Total_Current_A` | `total_current` | A | 3 | Sensors | Pack current (signed; − = discharge) |
+| `Total_Power_W` | `total_power` | W | 1 | Sensors | Pack power (signed) |
+| `SOC_percentage` | `soc_percentage` | % | 0 | Sensors | State of charge |
+| `SOH_percentage` | `soh_percentage` | % | 0 | **Diagnostics** | State of health |
+| `Remaining_Capacity_Ah` | `remaining_capacity_ah` | Ah | 2 | Sensors | Remaining capacity |
+| `Battery_Capacity_Ah` | `nominal_capacity_ah` | Ah | 2 | Sensors | Nominal capacity |
+| `Cycle_Count` | `cycle_count` | — | 0 | **Diagnostics** | Charge-cycle count |
+| `Cycle_Capacity_Ah` | `total_cycle_capacity_ah` | Ah | 2 | **Diagnostics** | Lifetime accumulated charge throughput |
+| `Total_runtime` | `total_runtime` | s | 0 | **Diagnostics** | Time since BMS power-on |
+| `Balance_current` | `balance_current` | A | 3 | Sensors | Cell-balance current |
+| `Mos_temp` | `mos_temp` | °C | 1 | Sensors | MOSFET temperature |
+| `Probe_1_temp` … `Probe_5_temp` | `probe_1_temp` … `probe_5_temp` | °C | 1 | Sensors | External probe temperatures |
+| `Heating_Current` ⚠ | `heating_current` | A | 3 | **Diagnostics** | Heating-element current — unverified |
+| `alarm_bits` | `alarm_bits` | — | 0 | **Diagnostics** | Raw 32-bit alarm bitmap |
+| `alarms` | `alarms` | — | — | Sensors | Active alarms, comma-separated |
 
 ### Pack-level (binary)
 
-| Topic suffix | Object id | Description |
-|---|---|---|
-| `Switch_Charge` | `switch_charge` | Charge MOSFET reported state |
-| `Switch_Discharge` | `switch_discharge` | Discharge MOSFET reported state |
-| `Switch_Balance` | `switch_balance` | Balance reported state |
-| `Heating` ⚠ | `heating` | Heating-element on/off (PB-series only) — unverified |
+| Topic suffix | Object id | HA section | Description |
+|---|---|---|---|
+| `Switch_Charge` | `switch_charge` | Sensors | Charge MOSFET reported state |
+| `Switch_Discharge` | `switch_discharge` | Sensors | Discharge MOSFET reported state |
+| `Switch_Balance` | `switch_balance` | Sensors | Balance reported state |
+| `Heating` ⚠ | `heating` | Sensors | Heating-element on/off (PB-series only) — unverified |
 
 ### Cell statistics
 
-| Topic suffix | Object id | Unit | Decimals | Description |
-|---|---|---|---|---|
-| `cell_voltage_average` | `cell_voltage_average` | V | 3 | Average cell voltage (populated cells) |
-| `cell_voltage_delta` | `cell_voltage_delta` | V | 3 | Max − min cell voltage |
-| `cell_voltage_max_value` | `cell_voltage_max_value` | V | 3 | Highest cell voltage |
-| `cell_voltage_min_value` | `cell_voltage_min_value` | V | 3 | Lowest cell voltage |
-| `cell_voltage_max_number` | `cell_voltage_max_number` | — | 0 | 1-indexed cell with highest voltage |
-| `cell_voltage_min_number` | `cell_voltage_min_number` | — | 0 | 1-indexed cell with lowest voltage |
-| `present_cell_count` | `present_cell_count` | — | 0 | Number of cells the BMS reports as present |
+| Topic suffix | Object id | Unit | Decimals | HA section | Description |
+|---|---|---|---|---|---|
+| `cell_voltage_average` | `cell_voltage_average` | V | 3 | Sensors | Average cell voltage (populated cells) |
+| `cell_voltage_delta` | `cell_voltage_delta` | V | 3 | Sensors | Max − min cell voltage |
+| `cell_voltage_max_value` | `cell_voltage_max_value` | V | 3 | Sensors | Highest cell voltage |
+| `cell_voltage_min_value` | `cell_voltage_min_value` | V | 3 | Sensors | Lowest cell voltage |
+| `cell_voltage_max_number` | `cell_voltage_max_number` | — | 0 | Sensors | 1-indexed cell with highest voltage |
+| `cell_voltage_min_number` | `cell_voltage_min_number` | — | 0 | Sensors | 1-indexed cell with lowest voltage |
+| `present_cell_count` | `present_cell_count` | — | 0 | **Diagnostics** | Number of cells the BMS reports as present |
 
 ### Per cell (1..N, where N = `present_cell_count`)
 
-| Topic suffix | Object id | Unit | Decimals | Description |
-|---|---|---|---|---|
-| `Cell_<n>_volt` | `cell_<n>_volt` | V | 3 | Cell `n` voltage |
-| `Cell_<n>_ohm` | `cell_<n>_ohm` | Ω | 3 | Cell `n` internal resistance |
+| Topic suffix | Object id | Unit | Decimals | HA section | Description |
+|---|---|---|---|---|---|
+| `Cell_<n>_volt` | `cell_<n>_volt` | V | 3 | Sensors | Cell `n` voltage |
+| `Cell_<n>_ohm` | `cell_<n>_ohm` | Ω | 3 | **Diagnostics** | Cell `n` internal resistance |
 
 ### Static / nameplate
 
-| Topic suffix | Object id | Description |
-|---|---|---|
-| `bms` | `bms_model` | BMS model identifier |
-| `fw` | `hw_version` | Hardware version |
-| `sw` | `sw_version` | Software / firmware version |
-| `serialnb` | `serial_number` | Serial number |
+| Topic suffix | Object id | HA section | Description |
+|---|---|---|---|
+| `bms` | `bms_model` | **Diagnostics** | BMS model identifier |
+| `fw` | `hw_version` | **Diagnostics** | Hardware version |
+| `sw` | `sw_version` | **Diagnostics** | Software / firmware version |
+| `serialnb` | `serial_number` | **Diagnostics** | Serial number |
 
 ## Read / write — basic tier
 
+All entries land in HA's **Configuration** section (`entity_category: config`).
 All addresses calibrated against spec V1.1 and verified against
 `scripts/captures/BMS_1.txt`. Visible as `number` / `switch` when
 `enable_basic_writes: true`, as `sensor` / `binary_sensor` otherwise (current
-value still shown).
+value still shown). The three primary on/off controls
+(`charging_switch` / `discharging_switch` / `balance_switch`) are also
+configuration-tier per the spec — they tune device behaviour rather than
+being the device's main on/off switch.
 
 | Topic suffix | Object id | Unit | Description |
 |---|---|---|---|
@@ -113,7 +133,8 @@ value still shown).
 
 ### Unverified packed-bit toggles (basic, hidden by default)
 
-The packed-bit register at `0x1114` holds several boolean flags but the bit
+All in HA's **Configuration** section (`entity_category: config`). The
+packed-bit register at `0x1114` holds several boolean flags but the bit
 positions are not yet confirmed. Marked `verified=False`; visible only when
 `debug_unverified_fields: true`.
 
@@ -125,6 +146,7 @@ positions are not yet confirmed. Marked `verified=False`; visible only when
 
 ## Read / write — safety tier
 
+All entries land in HA's **Configuration** section (`entity_category: config`).
 All addresses and encodings verified against `scripts/captures/BMS_1.txt` and
 the BMS app screenshots. Visible as `number` when `enable_safety_writes: true`,
 as `sensor` otherwise.

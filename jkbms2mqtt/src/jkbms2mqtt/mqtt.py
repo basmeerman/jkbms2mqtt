@@ -84,17 +84,44 @@ def _discovery_topic(
     return f"{discovery_prefix}/{component.value}/{bms_name}_device_{object_id}/config"
 
 
-def discovery_for_read_only(
-    entity: ReadOnlyEntity, bms_name: str, *, discovery_prefix: str
-) -> DiscoveryMessage:
-    unique_id = f"{bms_name}_device_{entity.object_id}"
+def _base_payload(
+    bms_name: str,
+    *,
+    object_id: str,
+    name: str,
+    topic_suffix: str,
+    entity_category: str | None,
+) -> dict[str, Any]:
+    """The fields every discovery payload shares, regardless of component.
+
+    ``entity_category`` is emitted only when set (HA treats an absent key as
+    "primary entity"), so passing ``None`` leaves it off the payload. Every
+    ``discovery_for_*`` builder starts from this so the common shape — and the
+    optional ``entity_category`` — lives in exactly one place.
+    """
+    unique_id = f"{bms_name}_device_{object_id}"
     payload: dict[str, Any] = {
-        "name": entity.description.rstrip("."),
-        "state_topic": _state_topic(bms_name, entity.topic_suffix),
+        "name": name.rstrip("."),
+        "state_topic": _state_topic(bms_name, topic_suffix),
         "unique_id": unique_id,
         "object_id": unique_id,
         "device": _device_info(bms_name),
     }
+    if entity_category is not None:
+        payload["entity_category"] = entity_category
+    return payload
+
+
+def discovery_for_read_only(
+    entity: ReadOnlyEntity, bms_name: str, *, discovery_prefix: str
+) -> DiscoveryMessage:
+    payload = _base_payload(
+        bms_name,
+        object_id=entity.object_id,
+        name=entity.description,
+        topic_suffix=entity.topic_suffix,
+        entity_category=entity.entity_category,
+    )
     if entity.device_class:
         payload["device_class"] = entity.device_class
     if entity.state_class:
@@ -125,20 +152,19 @@ def discovery_for_writable(
     ``binary_sensor`` (status only). Either way the same state topic carries
     the current BMS value.
     """
-    unique_id = f"{bms_name}_device_{entity.object_id}"
     is_bool = entity.register.encoding is Encoding.BOOL32
     if writable:
         component = Component.SWITCH if is_bool else Component.NUMBER
     else:
         component = Component.BINARY_SENSOR if is_bool else Component.SENSOR
 
-    payload: dict[str, Any] = {
-        "name": entity.description.rstrip("."),
-        "state_topic": _state_topic(bms_name, entity.topic_suffix),
-        "unique_id": unique_id,
-        "object_id": unique_id,
-        "device": _device_info(bms_name),
-    }
+    payload = _base_payload(
+        bms_name,
+        object_id=entity.object_id,
+        name=entity.description,
+        topic_suffix=entity.topic_suffix,
+        entity_category=entity.entity_category,
+    )
     if writable:
         payload["command_topic"] = _command_topic(bms_name, entity.topic_suffix)
     if entity.register.unit:
@@ -168,17 +194,16 @@ def discovery_for_packed_bit(
     entity: PackedBitEntity, bms_name: str, *, discovery_prefix: str, writable: bool
 ) -> DiscoveryMessage:
     """Discovery for a packed-bit boolean — switch when writable, binary sensor otherwise."""
-    unique_id = f"{bms_name}_device_{entity.object_id}"
     component = Component.SWITCH if writable else Component.BINARY_SENSOR
-    payload: dict[str, Any] = {
-        "name": entity.bit.description.rstrip("."),
-        "state_topic": _state_topic(bms_name, entity.topic_suffix),
-        "unique_id": unique_id,
-        "object_id": unique_id,
-        "device": _device_info(bms_name),
-        "payload_on": "ON",
-        "payload_off": "OFF",
-    }
+    payload = _base_payload(
+        bms_name,
+        object_id=entity.object_id,
+        name=entity.bit.description,
+        topic_suffix=entity.topic_suffix,
+        entity_category=entity.entity_category,
+    )
+    payload["payload_on"] = "ON"
+    payload["payload_off"] = "OFF"
     if writable:
         payload["command_topic"] = _command_topic(bms_name, entity.topic_suffix)
         payload["state_on"] = "ON"

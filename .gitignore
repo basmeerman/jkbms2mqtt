@@ -3,6 +3,8 @@ __pycache__/
 *.egg-info/
 .pytest_cache/
 .mutmut-cache
+mutants/
+mutmut-results.txt
 .mypy_cache/
 .ruff_cache/
 .coverage

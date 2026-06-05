@@ -72,11 +72,22 @@ class ReadOnlyEntity:
     decimals: int | None
     description: str
     verified: bool = True
+    # HA entity_category. None = primary entity (lands in Sensors / Controls).
+    # "diagnostic" = read-only debug / lifetime / static info (lands in
+    # Diagnostics). "config" is reserved for writable settings — read-only
+    # entities should not use it. See https://developers.home-assistant.io/docs/core/entity/
+    entity_category: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class WritableEntity:
-    """A writable parameter backed by a single 32-bit register (function 0x10)."""
+    """A writable parameter backed by a single 32-bit register (function 0x10).
+
+    Defaults ``entity_category`` to "config" — every writable setting tunes
+    device configuration and therefore belongs in HA's Configuration section,
+    regardless of whether it's currently surfaced as a writable number/switch
+    (tier on) or as a read-only sensor mirroring the same setting (tier off).
+    """
 
     object_id: str
     topic_suffix: str            # always `control/<name>`
@@ -84,17 +95,23 @@ class WritableEntity:
     component: Component
     description: str
     verified: bool = True
+    entity_category: str | None = "config"
 
 
 @dataclass(frozen=True, slots=True)
 class PackedBitEntity:
-    """A writable boolean stored as one bit inside the packed register 0x1114."""
+    """A writable boolean stored as one bit inside the packed register 0x1114.
+
+    Same reasoning as ``WritableEntity``: a device-mode toggle is always a
+    configuration entity, so default ``entity_category`` to "config".
+    """
 
     object_id: str
     topic_suffix: str            # always `control/<name>`
     bit: PackedBitDef
     component: Component = Component.SWITCH
     verified: bool = True
+    entity_category: str | None = "config"
 
 
 # -- Read-only sensors from JkRealtime -------------------------------------------------
@@ -154,6 +171,7 @@ LIVE_SENSORS: Final[tuple[ReadOnlyEntity, ...]] = (
         unit_of_measurement="%",
         decimals=0,
         description="State of health.",
+        entity_category="diagnostic",
     ),
     ReadOnlyEntity(
         object_id="remaining_capacity_ah",
@@ -187,6 +205,7 @@ LIVE_SENSORS: Final[tuple[ReadOnlyEntity, ...]] = (
         unit_of_measurement=None,
         decimals=0,
         description="Charge cycle count.",
+        entity_category="diagnostic",
     ),
     ReadOnlyEntity(
         object_id="balance_current",
@@ -275,6 +294,7 @@ LIVE_SENSORS: Final[tuple[ReadOnlyEntity, ...]] = (
         unit_of_measurement="s",
         decimals=0,
         description="Total runtime since BMS power-on.",
+        entity_category="diagnostic",
     ),
     ReadOnlyEntity(
         object_id="total_cycle_capacity_ah",
@@ -286,6 +306,7 @@ LIVE_SENSORS: Final[tuple[ReadOnlyEntity, ...]] = (
         unit_of_measurement="Ah",
         decimals=2,
         description="Lifetime accumulated charge throughput.",
+        entity_category="diagnostic",
     ),
     ReadOnlyEntity(
         object_id="heating_current",
@@ -298,6 +319,7 @@ LIVE_SENSORS: Final[tuple[ReadOnlyEntity, ...]] = (
         decimals=3,
         description="Current drawn by the heating element (PB-series only).",
         verified=False,
+        entity_category="diagnostic",
     ),
     # charge_status / charge_status_time removed: not present in V1.0/V1.1 spec.
     # The BMS app's "Bulk/Float" state comes from the BLE protocol, not Modbus.
@@ -311,6 +333,7 @@ LIVE_SENSORS: Final[tuple[ReadOnlyEntity, ...]] = (
         unit_of_measurement=None,
         decimals=0,
         description="Raw alarm bitmap (32-bit).",
+        entity_category="diagnostic",
     ),
     ReadOnlyEntity(
         object_id="alarms",
@@ -458,6 +481,7 @@ CELL_STATS_SENSORS: Final[tuple[ReadOnlyEntity, ...]] = (
         unit_of_measurement=None,
         decimals=0,
         description="Number of cells the BMS reports as present.",
+        entity_category="diagnostic",
     ),
 )
 
@@ -494,6 +518,7 @@ def expand_cell_entities(cell_count: int) -> tuple[ReadOnlyEntity, ...]:
                 unit_of_measurement="Ω",
                 decimals=3,
                 description=f"Cell {n} internal resistance.",
+                entity_category="diagnostic",
             )
         )
     return tuple(out)
@@ -512,6 +537,7 @@ FIXED_SENSORS: Final[tuple[ReadOnlyEntity, ...]] = (
         unit_of_measurement=None,
         decimals=None,
         description="BMS model identifier.",
+        entity_category="diagnostic",
     ),
     ReadOnlyEntity(
         object_id="hw_version",
@@ -523,6 +549,7 @@ FIXED_SENSORS: Final[tuple[ReadOnlyEntity, ...]] = (
         unit_of_measurement=None,
         decimals=None,
         description="BMS hardware version.",
+        entity_category="diagnostic",
     ),
     ReadOnlyEntity(
         object_id="sw_version",
@@ -534,6 +561,7 @@ FIXED_SENSORS: Final[tuple[ReadOnlyEntity, ...]] = (
         unit_of_measurement=None,
         decimals=None,
         description="BMS software / firmware version.",
+        entity_category="diagnostic",
     ),
     ReadOnlyEntity(
         object_id="serial_number",
@@ -545,6 +573,7 @@ FIXED_SENSORS: Final[tuple[ReadOnlyEntity, ...]] = (
         unit_of_measurement=None,
         decimals=None,
         description="BMS serial number.",
+        entity_category="diagnostic",
     ),
 )
 

@@ -224,6 +224,36 @@ class TestEncoderInternals:
         with pytest.raises(EncodeError, match="i32"):
             _i32_to_words(2**31)
 
+    # Exactness: the real-register encode tests above all use values whose high
+    # word is zero, so they can't see a wrong shift/mask in the high word. These
+    # pin the big-endian word split with a non-zero high word and the bounds.
+
+    def test_u32_high_word_split(self) -> None:
+        # 0x1234_5678 → [high, low]; catches >>16↔<<16, >>17, and &0xFFFF↔65536.
+        assert _u32_to_words(0x1234_5678) == [0x1234, 0x5678]
+
+    def test_u32_upper_bound_accepted(self) -> None:
+        # The max u32 must be allowed (guards the `<=` boundary, not `<`).
+        assert _u32_to_words(0xFFFF_FFFF) == [0xFFFF, 0xFFFF]
+
+    def test_u32_zero(self) -> None:
+        assert _u32_to_words(0) == [0, 0]
+
+    def test_i32_max_accepted(self) -> None:
+        # 2**31 - 1 = 0x7FFF_FFFF must be allowed and split correctly.
+        assert _i32_to_words(2**31 - 1) == [0x7FFF, 0xFFFF]
+
+    def test_i32_min_accepted(self) -> None:
+        # -(2**31) wraps to 0x8000_0000 (guards the lower `<=` bound + the
+        # `value += 0x1_0000_0000` two's-complement fixup).
+        assert _i32_to_words(-(2**31)) == [0x8000, 0x0000]
+
+    def test_i32_negative_one(self) -> None:
+        assert _i32_to_words(-1) == [0xFFFF, 0xFFFF]
+
+    def test_i32_positive_high_word(self) -> None:
+        assert _i32_to_words(0x0123_4567) == [0x0123, 0x4567]
+
 
 def test_packed_bit_def_dataclass_shape() -> None:
     """Sanity check the PackedBitDef has the fields we depend on."""
@@ -309,6 +339,59 @@ class TestDecodeRegisterValue:
         )
         with pytest.raises(EncodeError, match="outside settings block"):
             decode_register_value(r, [0] * 4)
+
+    def _synth(self, encoding: Encoding) -> RegisterDef:
+        return RegisterDef(
+            name="synth", address=0x1000 + 0x30, encoding=encoding,
+            min_value=0, max_value=1, step=1, unit=None,
+            tier=WriteTier.BASIC, description="synth",
+        )
+
+    def _put_words(self, regs: list[int], reg: RegisterDef, hi: int, lo: int) -> None:
+        from jkbms2mqtt.protocol.jk_settings import SETTINGS_BLOCK_BASE
+        off = reg.address - SETTINGS_BLOCK_BASE
+        regs[off] = hi
+        regs[off + 1] = lo
+
+    def test_raw_combines_high_and_low_words(self, regs: list[int]) -> None:
+        # Direct word placement with a non-zero high word — the roundtrip tests
+        # all use small values (high word 0) and miss `hi << 16` / `| lo` bugs.
+        from jkbms2mqtt.protocol.jk_settings import decode_register_value
+        r = self._synth(Encoding.U32_RAW)
+        self._put_words(regs, r, 0x1234, 0x5678)
+        assert decode_register_value(r, regs) == float(0x1234_5678)
+
+    def test_milli_uses_full_32_bits(self, regs: list[int]) -> None:
+        from jkbms2mqtt.protocol.jk_settings import decode_register_value
+        r = self._synth(Encoding.U32_MILLI)
+        self._put_words(regs, r, 0x0001, 0x0000)  # 65536 mUnits = 65.536
+        assert decode_register_value(r, regs) == pytest.approx(65.536)
+
+    def test_deci_uses_full_32_bits(self, regs: list[int]) -> None:
+        from jkbms2mqtt.protocol.jk_settings import decode_register_value
+        r = self._synth(Encoding.U32_DECI)
+        self._put_words(regs, r, 0x0001, 0x0000)  # 65536 deci = 6553.6
+        assert decode_register_value(r, regs) == pytest.approx(6553.6)
+
+    def test_i32_sign_boundary_is_negative_at_0x80000000(self, regs: list[int]) -> None:
+        # raw32 == 0x8000_0000 must decode negative (guards the `>=` boundary).
+        from jkbms2mqtt.protocol.jk_settings import decode_register_value
+        r = self._synth(Encoding.I32_DECI)
+        self._put_words(regs, r, 0x8000, 0x0000)
+        assert decode_register_value(r, regs) == pytest.approx(-214748364.8)
+
+    def test_i32_just_below_sign_boundary_is_positive(self, regs: list[int]) -> None:
+        from jkbms2mqtt.protocol.jk_settings import decode_register_value
+        r = self._synth(Encoding.I32_DECI)
+        self._put_words(regs, r, 0x7FFF, 0xFFFF)
+        assert decode_register_value(r, regs) == pytest.approx(214748364.7)
+
+    def test_bool_true_only_in_high_word(self, regs: list[int]) -> None:
+        # Non-zero in EITHER word counts as on — guards `raw32 != 0`.
+        from jkbms2mqtt.protocol.jk_settings import decode_register_value
+        r = self._synth(Encoding.BOOL32)
+        self._put_words(regs, r, 0x0001, 0x0000)
+        assert decode_register_value(r, regs) is True
 
 
 class TestDecodePackedBit:

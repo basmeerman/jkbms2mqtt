@@ -70,7 +70,7 @@ spec byte in both rows. Where they differ, that is a real disagreement.
 | `CellConWireRes0..31` | UINT32 | μΩ × 32 cells | `0x0088` | `0x0088` | — | `addr=0x1088`<br>spec byte `0x110` (treats spec byte as reg)<br>phinix/include/backup/numbers/JK-1000_88-FC_number_bak.yaml:90<br><br>`addr=0x1088`<br>spec byte `0x110` (treats spec byte as reg)<br>phinix/include/backup/numbers/JK-1000_number.yaml:343 | — |
 | `DevAddr` | UINT32 | addr | `0x0108` | `0x0108` | — | `addr=0x1108`<br>spec byte `0x210` (treats spec byte as reg)<br>phinix/include/backup/numbers/JK-1000_number.yaml:492<br><br>`addr=0x1108`<br>spec byte `0x210` (treats spec byte as reg)<br>phinix/include/backup/numbers/JK-1100_00-18_number_bak.yaml:169 | — |
 | `TIMProdischarge` | UINT32 | s | `0x010C` | `0x010C` | — | `addr=0x110C`<br>spec byte `0x218` (treats spec byte as reg)<br>phinix/include/backup/numbers/JK-1000_number.yaml:504<br><br>`addr=0x110C`<br>spec byte `0x218` (treats spec byte as reg)<br>phinix/include/backup/numbers/JK-1100_00-18_number_bak.yaml:181 | — |
-| `packed_bits` | UINT16 | bitfield | `0x0114` | `0x0114` | byte `0x114` (reg `0x108A`)<br>jkbms2mqtt/src/jkbms2mqtt/protocol/jk_settings.py:156 | — | — |
+| `packed_bits` | UINT16 | bitfield | `0x0114` | `0x0114` | byte `0x228` (reg `0x1114`)<br>jkbms2mqtt/src/jkbms2mqtt/protocol/jk_settings.py:166 | — | — |
 | `TMPBatOTA / TMPBatOTAR` | INT8 | °C | `0x0116` | — | — | — | — |
 | `TIMSmartSleep` | UINT8 | H | `0x0118` | `0x0118` | — | `addr=0x1118`<br>spec byte `0x230` (treats spec byte as reg)<br>phinix/include/full/sensors/02_JK-1100_00-18_sensor.yaml:19<br><br>`addr=0x1118`<br>spec byte `0x230` (treats spec byte as reg)<br>phinix/include/modules/sensors/JK-1100_00-18_sensor.yaml:19 | — |
 
