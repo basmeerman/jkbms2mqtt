@@ -285,8 +285,10 @@ async def test_packed_bit_round_trip() -> None:
             bms_name="BMS_1", slave_addr=1, object_id="smart_sleep_switch", raw_payload="ON"
         )
     )
-    assert client.last_read_address == 0x108A  # spec V1.1 packed-bit register
-    assert client.last_write_address == 0x108A
+    # PB2A16S20P firmware exposes the packed-bit register at empirical 0x1114
+    # rather than the spec's 0x108A — see jk_settings.PACKED_BIT_REGISTER.
+    assert client.last_read_address == 0x1114
+    assert client.last_write_address == 0x1114
     assert client.last_write_register_value == 0x40  # bit 6 (SmartSleep) set
     assert ("BMS_1/control/smart_sleep_switch", "ON") in pub.log
 

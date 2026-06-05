@@ -43,7 +43,7 @@ Verdict legend:
 | `SOCSOH\|Precharge` | `0xB8` | `0x125C` | `0x5C` | **MATCH** |
 | `RunTime` | `0xBC..0xBF` | `0x125E..0x125F` | `0x5E..0x5F` | **MATCH** |
 | `Charge\|Discharge` | `0xC0` | `0x1260` | `0x60` | **MATCH** |
-| `Heating` (high byte of) | `0xD0..0xD1` | `0x1268` | **FIXED** — was at speculative `0x65` |
+| `Heating` (**low** byte of) | `0xD0..0xD1` | `0x1268` | **FIXED twice** — was speculative `0x65`; later wrong byte (high) within `0x1268`. BMS_1 sweep confirmed the heater bit is the **low** byte and the app showed `Heating: OFF` matching reg `0x1268 = 0xFF00`. |
 | `HeatCurrent` | `0xE6` | `0x1273` | **FIXED** — was at speculative `0x64` (which is actually `TimeCOCPR`) |
 | `TempBat 3` | `0xF8` | `0x127C` | empirical `0xF4` | **FW-DEVIATION** — spec'd reg reads zero on PB2A16S20P; data lives at `0x12F4` |
 | `TempBat 4` | `0xFA` | `0x127D` | empirical `0xF5` | **FW-DEVIATION** |
@@ -92,7 +92,7 @@ Verdict legend:
 | `CellConWireRes[0..31]` (μΩ writable) | `0x88..0x104` | `0x1044..0x1082` | — | **NOT EXPOSED** — 32 entities of low value to typical HA users; skip until requested |
 | `DevAddr` | `0x108` | `0x1084` | — | **NOT EXPOSED** — matches the user's `bms_ids` config; redundant |
 | `TIMProdischarge` | `0x10C` | `0x1086` | — | **NOT EXPOSED** — niche; skip until requested |
-| packed-bit register | `0x114` | `0x108A` | was `0x1114` | **FIXED** to spec address |
+| packed-bit register | `0x114` | `0x108A` (spec) | `0x1114` (empirical) | **FW-DEVIATION** — restored to `0x1114` after BMS_1 sweep showed reg `0x108A = 0x0000` while app had `ChargingFloatMode / Discharge OCP 2 / Discharge OCP 3` ON. Reg `0x1114 = 0x3200` (bits 9 / 12 / 13) matches the three ON toggles on PB2A16S20P. Same byte-as-register firmware deviation as `TempBat3/4/5`. |
 | `TIMSmartSleep` (UINT8 hours) | `0x118` | `0x108C` | — | **NOT EXPOSED** — niche |
 
 ## Packed-bit register (UINT16 at `0x108A`)
