@@ -1,6 +1,6 @@
 ---
 name: jkbms2mqtt
-version: "2.0.0"
+version: "2.0.1"
 slug: jkbms2mqtt
 description: JK-BMS to MQTT bridge using the standard RS485 Modbus V1.0 / V1.1 protocol
 url: https://github.com/basmeerman/jkbms2mqtt
