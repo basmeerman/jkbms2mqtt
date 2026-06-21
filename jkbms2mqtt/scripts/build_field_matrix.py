@@ -4,21 +4,17 @@ Output columns per field:
   V1.0 byte / V1.1 byte: byte offset within the spec'd block base
   This repo:   byte 0xNN (reg 0xRRRR) @ file:line
   Phinix-org:  byte 0xNN (reg 0xRRRR) @ file:line — both YAML conventions
-  Jean:        Trame N byte 0xNN (= spec byte 0xMM after 6-byte hdr) @ file:line
 
 Each cited byte is back-computed from the literal address constant in the
 source — not an inference. The block base used for each conversion is shown.
 """
 from __future__ import annotations
 
-import json
 import re
 from pathlib import Path
 
 REPO = Path("/Users/basmeerman/Downloads/jkbms2mqtt")
 PHINIX = Path("/tmp/jk-research/phinix")
-JEAN_JSON = REPO / "upstream_reference" / "trame_specs.json"
-JEAN_REL = "upstream_reference/trame_specs.json"
 
 OUR_SETTINGS = REPO / "jkbms2mqtt" / "src" / "jkbms2mqtt" / "protocol" / "jk_settings.py"
 OUR_MODBUS = REPO / "jkbms2mqtt" / "src" / "jkbms2mqtt" / "protocol" / "jk_modbus.py"
@@ -499,105 +495,6 @@ def find_phinix(spec_name: str, spec_block_base: int) -> str:
     return "<br><br>".join(out[:2]) if out else "—"
 
 
-# -- 4. Jean's frame — extract from trame_specs.json -------------------------------
-
-JEAN_DATA = json.loads(JEAN_JSON.read_text())
-
-# Build name-by-line index by scanning the file textually so we can cite line numbers.
-JEAN_LINES = JEAN_JSON.read_text().splitlines()
-
-
-def jean_line_for(name_quoted: str) -> int | None:
-    needle = f'"name": "{name_quoted}"'
-    for i, line in enumerate(JEAN_LINES, 1):
-        if needle in line:
-            return i
-    return None
-
-
-# Map spec name → exact field name in Jean's JSON (substring match).
-JEAN_BINDING = {
-    "VolSmartSleep":     ("Trame 2", "smart_sleep_voltage_V"),
-    "VolCellUV":         ("Trame 2", "cell_voltage_undervoltage_protection_V"),
-    "VolCellUVPR":       ("Trame 2", "cell_voltage_undervoltage_recovery_V"),
-    "VolCellOV":         ("Trame 2", "cell_voltage_overvoltage_protection_V"),
-    "VolCellOVPR":       ("Trame 2", "cell_voltage_overvoltage_recovery_V"),
-    "VolBalanTrig":      ("Trame 2", "balance_trigger_voltage_V"),
-    "VolSOC100%":        ("Trame 2", "cell_voltage_at_100SOC_V"),
-    "VolSOC0%":          ("Trame 2", "cell_voltage_at_0SOC_V"),
-    "VolCellRCV":        ("Trame 2", "cell_request_charge_voltage_V"),
-    "VolCellRFV":        ("Trame 2", "cell_request_float_voltage_V"),
-    "VolSysPwrOff":      ("Trame 2", "power_off_voltage_V"),
-    "CurBatCOC":         ("Trame 2", "max_charge_current_A"),
-    "TIMBatCOCPDly":     ("Trame 2", "charge_overcurrent_protection_delay_S"),
-    "TIMBatCOCPRDly":    ("Trame 2", "charge_overcurrent_protection_recovery_time_S"),
-    "CurBatDcOC":        ("Trame 2", "max_discharge_current_A"),
-    "TIMBatDcOCPDly":    ("Trame 2", "discharge_overcurrent_protection_delay_S"),
-    "TIMBatDcOCPRDly":   ("Trame 2", "discharge_overcurrent_protection_recovery_time_S"),
-    "TIMBatSCPRDly":     ("Trame 2", "short_circuit_protection_recovery_time_S"),
-    "CurBalanMax":       ("Trame 2", "max_balance_current_A"),
-    "TMPBatCOT":         ("Trame 2", "charge_overtemperature_protection_C"),
-    "TMPBatCOTPR":       ("Trame 2", "charge_overtemperature_protection_recovery_C"),
-    "TMPBatDcOT":        ("Trame 2", "discharge_overtemperature_protection_C"),
-    "TMPBatDcOTPR":      ("Trame 2", "discharge_overtemperature_protection_recovery_C"),
-    "TMPBatCUT":         ("Trame 2", "charge_undertemperature_protection_C"),
-    "TMPBatCUTPR":       ("Trame 2", "charge_undertemperature_protection_recovery_C"),
-    "TMPMosOT":          ("Trame 2", "power_tube_overtemperature_protection_C"),
-    "TMPMosOTPR":        ("Trame 2", "power_tube_overtemperature_protection_recovery_C"),
-    "CellCount":         ("Trame 2", "cell_count"),
-    "BatChargeEN":       ("Trame 2", "Switch_Charge"),
-    "BatDisChargeEN":    ("Trame 2", "Switch_Discharge"),
-    "BalanEN":           ("Trame 2", "Switch_Balance"),
-    "CapBatCell":        ("Trame 2", "Battery_Capacity_Ah"),
-    "VolStartBalan":     ("Trame 2", "balance_starting_voltage_V"),
-    "CellVol0..31":      ("Trame 3", "Cell_1_volt_V"),
-    "CellWireRes0..31":  ("Trame 3", "Cell_1_ohm_R"),
-    "TempMos":           ("Trame 3", "Mos_temp"),
-    "BatVol":            ("Trame 3", "Total_Voltage_V"),
-    "BatCurrent":        ("Trame 3", "Total_Current_A"),
-    "BatWatt":           ("Trame 3", "Total_Power_W"),
-    "TempBat1":          ("Trame 3", "Probe_1_temp"),
-    "TempBat2":          ("Trame 3", "Probe_2_temp"),
-    "TempBat3":          ("Trame 3", "Probe_3_temp"),
-    "TempBat4":          ("Trame 3", "Probe_4_temp"),
-    "TempBat5":          ("Trame 3", "Probe_5_temp"),
-    "BalanCurrent":      ("Trame 3", "Balance_current"),
-    "BalanSta / SOCStateOfcharge": ("Trame 3", "SOC_percentage"),
-    "SOCCapRemain":      ("Trame 3", "Remaining_Capacity_Ah"),
-    "SOCCycleCount":     ("Trame 3", "Cycle_Count"),
-    "SOCCycleCap":       ("Trame 3", "Cycle_Capacity_Ah"),
-    "SOCSOH / Precharge": ("Trame 3", "SOH_percentage"),
-    "RunTime":           ("Trame 3", "Total_runtime"),
-    "Charge / Discharge": ("Trame 3", "Switch_Charge"),
-    "TempSensorAbsent / Heating": ("Trame 3", "Heating"),
-    "HeatCurrent":       ("Trame 3", "Heating_Current"),
-    "ManufacturerDeviceID": ("Trame 1", "BMS_A"),
-    "HardwareVersion":   ("Trame 1", "FW_A"),
-    "SoftwareVersion":   ("Trame 1", "SW_N"),
-}
-
-
-def find_jean(spec_name: str, spec_byte: int) -> str:
-    binding = JEAN_BINDING.get(spec_name)
-    if not binding:
-        return "—"
-    trame, field_name = binding
-    for f in JEAN_DATA.get(trame, []):
-        if f["name"] == field_name:
-            frame_byte = f["offset"]
-            line = jean_line_for(field_name)
-            type_ = f.get("type", "?")
-            scale = f.get("scale", "")
-            # equivalent spec byte (after 6-byte frame header)
-            equiv = frame_byte - 6
-            note = ""
-            if equiv != spec_byte:
-                note = f"<br>(≠ spec byte 0x{spec_byte:02X} − Jean's frame layout differs)"
-            cite = f"{JEAN_REL}:{line}" if line else JEAN_REL
-            return f"{trame} byte `0x{frame_byte:02X}` (= spec byte `0x{equiv:02X}`) {type_} {scale}<br>{cite}{note}"
-    return "—"
-
-
 # -- 5. emit markdown --------------------------------------------------------------
 
 block_titles = {
@@ -609,12 +506,11 @@ block_titles = {
 
 print("# Field matrix — spec vs implementations\n")
 print("Generated by [`scripts/build_field_matrix.py`](../scripts/build_field_matrix.py) ")
-print("from five primary sources:\n")
+print("from four primary sources:\n")
 print("1. **V1.0** — [`specifications/BMS.RS485.Modbus.V1.0.pdf`](specifications/BMS.RS485.Modbus.V1.0.pdf), byte offsets hand-transcribed.")
 print("2. **V1.1** — [`specifications/BMS.RS485.Modbus.V1.1.pdf`](specifications/BMS.RS485.Modbus.V1.1.pdf), byte offsets hand-transcribed.")
 print("3. **This repo** — `RegisterDef.address` (settings) or `_OFF_*: Final = …` (RT / info) in our protocol modules. Byte = `(reg − block_base) × 2` for settings/info; byte = `buffer_offset × 2` for the stitched RT block.")
 print("4. **Phinix-org** — [Multiple-JK-BMS-by-Modbus-RS485](https://github.com/phinix-org/Multiple-JK-BMS-by-Modbus-RS485). Each YAML defines either `address` alone or `address + offset`; both literal numbers shown, plus the implied spec byte they map to.")
-print("5. **Jean** — [`upstream_reference/trame_specs.json`](../../upstream_reference/trame_specs.json), the field map for the proprietary 0x55AAEB90 BLE/UART frame Jean's Node-RED add-on uses. **Different protocol.** Jean's frame byte = spec byte + 6 (header). Little-endian.\n")
 print("`—` = field not present / not decoded in that source.\n")
 print("## How phinix's two address conventions compare\n")
 print("- Files under `include/backup/sensors/` and `include/devel/sensors/` write")
@@ -642,8 +538,7 @@ for (base, byte, typ, length, rw, name, unit, ver) in V11_FIELDS:
 
     ours = find_ours(name, base)
     phx = find_phinix(name, base)
-    jn = find_jean(name, byte)
-    rows.append((base, name, typ, unit, v10, v11, ours, phx, jn))
+    rows.append((base, name, typ, unit, v10, v11, ours, phx))
 
 groups = {}
 for r in rows:
@@ -651,7 +546,7 @@ for r in rows:
 
 for base in sorted(groups):
     print(f"\n## {block_titles[base]}\n")
-    print("| Field | Type | Unit | V1.0 byte | V1.1 byte | This repo (byte / reg) | Phinix-org (byte / reg / @file:line) | Jean (Trame byte / @file:line) |")
-    print("|---|---|---|---|---|---|---|---|")
-    for (_, name, typ, unit, v10, v11, ours, phx, jn) in groups[base]:
-        print(f"| `{name}` | {typ} | {unit} | {v10} | {v11} | {ours} | {phx} | {jn} |")
+    print("| Field | Type | Unit | V1.0 byte | V1.1 byte | This repo (byte / reg) | Phinix-org (byte / reg / @file:line) |")
+    print("|---|---|---|---|---|---|---|")
+    for (_, name, typ, unit, v10, v11, ours, phx) in groups[base]:
+        print(f"| `{name}` | {typ} | {unit} | {v10} | {v11} | {ours} | {phx} |")

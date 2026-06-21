@@ -138,8 +138,44 @@ That's the whole source tree — the `pymodbus` pivot dropped roughly 900 lines
 of hand-rolled protocol code (CRC, framer, scanner, ack parser, BusArbiter,
 JSONL recorder, broadcast/CAN runners) compared to the previous revision.
 
+## Sources & acknowledgements
+
+This add-on is an independent implementation, but it stands on the work of
+several projects and was cross-checked against them. Thanks to all of them:
+
+- **JIKONG (JK BMS) RS485 Modbus protocol, V1.0 / V1.1** — the protocol this
+  add-on speaks. Every register address and encoding is grounded in JIKONG's
+  official spec PDFs, mirrored for reference from
+  [ciciban/jkbms-PB2A16S20P](https://github.com/ciciban/jkbms-PB2A16S20P) and
+  [syssi/esphome-jk-bms](https://github.com/syssi/esphome-jk-bms) (Apache-2.0).
+  The PDFs are © JIKONG Electronic Technology Co., Ltd.; see
+  [`docs/specifications/README.md`](docs/specifications/README.md).
+- **[phinix-org/Multiple-JK-BMS-by-Modbus-RS485](https://github.com/phinix-org/Multiple-JK-BMS-by-Modbus-RS485)**
+  (Apache-2.0) — the wiring photos/diagrams under [`docs/wiring/`](docs/wiring/)
+  are reused unmodified from this project, and its YAML register definitions
+  were used as one cross-check column in
+  [`docs/FIELD_MATRIX.md`](docs/FIELD_MATRIX.md).
+- **"JK-BMS wired management" add-on** by smartphoton
+  ([domosimple.eu](https://domosimple.eu/forum/thread-917.html)) — the MQTT
+  topic-naming convention (`Total_Voltage_V`, `Cell_N_volt`, `Mos_temp`, …)
+  follows this widely-used add-on so existing dashboards keep working (see
+  [`MIGRATION.md`](../MIGRATION.md)). Its BLE/UART frame field map was used as a
+  reference column in the field matrix. No code from it is included here.
+- **[syssi/esphome-jk-bms](https://github.com/syssi/esphome-jk-bms)**
+  (Apache-2.0) — general JK-BMS protocol reference.
+
+Only **facts** (register addresses, encodings, topic names) were drawn from the
+reference projects above — no source code was copied. The sole copied artifacts
+are the phinix-org wiring images, whose license is honoured below.
+
 ## License
 
-MIT. Wiring diagrams under `docs/wiring/` are reused from
+This project is licensed under the **MIT License** — see [`../LICENSE`](../LICENSE).
+
+The wiring photos/diagrams under [`docs/wiring/`](docs/wiring/) are **not**
+covered by the MIT license. They are reused from
 [phinix-org/Multiple-JK-BMS-by-Modbus-RS485](https://github.com/phinix-org/Multiple-JK-BMS-by-Modbus-RS485)
-under Apache 2.0.
+(Copyright 2025 Radek) under the **Apache License 2.0**; a copy of that license
+travels with them in
+[`docs/wiring/LICENSE-Apache-2.0`](docs/wiring/LICENSE-Apache-2.0), as Apache
+2.0 §4 requires.
