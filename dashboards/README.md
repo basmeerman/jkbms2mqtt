@@ -84,3 +84,29 @@ Copy `jkbms_aggregates.yaml` into `<config>/packages/` and restart HA.
 - **Re-generate after changing `bms_ids` or cell counts** and re-paste.
 - **Five temperature probes** are shown (`probe_1..5`); unused probes show
   Unavailable. Unverified fields (`heating`, packed-bit toggles) are excluded.
+
+## CI drift guard
+
+The `dashboards` CI job (`.github/workflows/ci.yml`) keeps this folder honest on
+every push/PR:
+
+1. **Lint** `generate.py` + `check_entities.py` with the repo's ruff config.
+2. **Sync** — regenerates the YAML and fails if the committed `out/` /
+   `packages/` differ (someone edited the generator but didn't regenerate).
+3. **Entity drift** — `check_entities.py` reconciles the dashboard's references
+   against the bridge's own entity table (`jkbms2mqtt.entities`) at the
+   `(domain, object_id)` level and fails if the bridge adds/removes/renames an
+   entity the dashboard doesn't track, or the dashboard references an entity the
+   bridge no longer publishes.
+
+Run the guard locally:
+
+```sh
+python dashboards/generate.py --bms-ids 1,2,3,4,5,6 --cells 16  # then check it's unchanged
+python dashboards/check_entities.py
+```
+
+It catches *set* drift (added/removed/renamed entities). It cannot catch a
+description-text change that only alters an HA entity slug — the deployed
+naming isn't reproducible from source — so for that, run
+`out/verify-entities.jinja` against a live instance.

@@ -48,6 +48,36 @@ jobs:
       - name: Run tests with 100% branch coverage gate
         run: pytest --cov --cov-branch --cov-report=term --cov-fail-under=100
 
+  dashboards:
+    # Lint the dashboard generator, assert the committed artifacts are in sync
+    # with it, and assert the dashboard references exactly the entities the
+    # bridge publishes — so entity drift fails the build.
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    # generate.py / check_entities.py live at the repo root, not the add-on subdir.
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: jkbms2mqtt/pyproject.toml
+      # Editable install makes jkbms2mqtt.entities importable (the source of
+      # truth for the drift check) and provides ruff; PyYAML drives the generator.
+      - run: pip install -e ./jkbms2mqtt[dev] pyyaml
+      - name: Lint generator + checker
+        run: ruff check --config jkbms2mqtt/pyproject.toml dashboards/generate.py dashboards/check_entities.py
+      - name: Assert committed dashboard artifacts are in sync with the generator
+        run: |
+          python dashboards/generate.py --bms-ids 1,2,3,4,5,6 --cells 16
+          git diff --exit-code dashboards/out dashboards/packages
+      - name: Assert dashboard entities match the bridge's entity table
+        run: python dashboards/check_entities.py
+
   docker-build:
     # Validate the supervisor's local-build path on every PR by building the
     # add-on Dockerfile the same way HA does. Never pushes — no creds needed.

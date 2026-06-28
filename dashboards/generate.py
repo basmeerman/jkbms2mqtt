@@ -233,12 +233,13 @@ def _alarm_chip(n: int) -> dict:
     """Mushroom tile that goes red with the alarm text when alarms are active."""
     e = sensor(n, "alarms")
     empties = "['', 'unknown', 'unavailable', 'none', 'None']"
+    cond = f"states('{e}') in {empties}"
     return {
         "type": "custom:mushroom-template-card",
         "primary": "Alarms",
-        "secondary": f"{{% if states('{e}') in {empties} %}}None{{% else %}}{{{{ states('{e}') }}}}{{% endif %}}",
-        "icon": f"{{% if states('{e}') in {empties} %}}mdi:shield-check{{% else %}}mdi:alert{{% endif %}}",
-        "icon_color": f"{{% if states('{e}') in {empties} %}}green{{% else %}}red{{% endif %}}",
+        "secondary": f"{{% if {cond} %}}None{{% else %}}{{{{ states('{e}') }}}}{{% endif %}}",
+        "icon": f"{{% if {cond} %}}mdi:shield-check{{% else %}}mdi:alert{{% endif %}}",
+        "icon_color": f"{{% if {cond} %}}green{{% else %}}red{{% endif %}}",
         "entity": e,
         "tap_action": {"action": "more-info"},
     }
