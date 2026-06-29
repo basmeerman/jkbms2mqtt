@@ -88,6 +88,10 @@ integrations (`Total_Voltage_V`, `Cell_1_volt`, `Mos_temp`, `SOC_percentage`,
 5. Start. The supervisor builds the image locally from the Dockerfile in this
    directory.
 6. Devices appear under **Settings → Devices** as `BMS_1` … `BMS_<n>`.
+7. A ready-made **JK-BMS dashboard** is auto-written to `<config>/jkbms2mqtt/`
+   (`install_dashboard: true`); add the one-time `configuration.yaml` block from
+   [`DOCS.md`](DOCS.md#dashboard) (+ HACS cards) to show it in the sidebar. See
+   [`QUICKSTART.md`](../QUICKSTART.md) for the end-to-end walkthrough.
 
 ### As a standalone container
 

@@ -4,10 +4,58 @@ Generated, static Lovelace dashboards for the packs published by this add-on.
 One **Overview** of every pack plus a per-pack **detail subview** (Live, Cells,
 Diagnostics, Controls, History).
 
-These target **this bridge's** real entity ids (`<domain>.bms_<n>_<slug>`,
-e.g. `sensor.bms_1_total_pack_voltage`), verified against a live install. They
+They target **this bridge's** entity ids, verified against a live install, and
 are *not* compatible with other JK-BMS add-ons that name entities differently.
-See [`PLAN.md`](PLAN.md) for the design and the verified naming map.
+See [`PLAN.md`](PLAN.md) for the design and the entity-naming map.
+
+## What it looks like
+
+### Overview — the whole bank at a glance
+
+![Overview](docs/batterybank_overview.png)
+
+A full-width **Bank summary** row — total power, total current, hottest pack,
+lowest-SoC pack, and an alarm indicator (temperature / SoC / alarm each name the
+reporting BMS) — sits above one tile per pack: SoC bar, Voltage / Power / Current
+gauges, average / delta / min cell, MOS temperature, cycle count, and an alarm
+chip. Offline packs hide automatically. Tap a pack heading to open its detail page.
+
+### Per-pack detail
+
+Each pack opens a subview with five sections. **Live**, **Cells** (a colour-coded
+per-cell voltage table — highest cell blue, lowest red — plus a resistance table),
+and **Diagnostics** + **Nameplate**:
+
+![Pack detail — Live, Cells, Diagnostics](docs/bms_1a.png)
+
+Scrolling down: **Controls** (editable `number`/`switch` settings, shown only
+when the add-on's write tiers are enabled) and **History** graphs:
+
+![Pack detail — Controls (basic) and History](docs/bms_1b.png)
+![Pack detail — Safety thresholds and Temperatures history](docs/bms_1c.png)
+![Pack detail — Safety thresholds, continued](docs/bms_1d.png)
+
+## Two ways to install
+
+- **Auto-install (recommended, new installs).** The add-on writes this
+  dashboard + package into `<config>/jkbms2mqtt/` on startup
+  (`install_dashboard: true`, the default) and a one-time `configuration.yaml`
+  block shows it in the sidebar — self-updating, no re-paste. See
+  [DOCS.md → Dashboard](../jkbms2mqtt/DOCS.md#dashboard). You still install the
+  HACS cards (below).
+- **Manual generate + paste (this folder).** Use the generator directly — for
+  existing installs whose entity ids are the "sticky" legacy `…_total_pack_voltage`
+  form, or if you'd rather not let the add-on write to your config dir. Steps
+  1–4 below.
+
+### Entity-naming modes
+
+A *fresh* install publishes `sensor.bms_<n>_device_<object_id>` ids
+(`--naming device`). Installs predating the add-on's `object_id` discovery kept
+the legacy `sensor.bms_<n>_<slug>` ids — HA never auto-renames them, so they're
+"sticky" (`--naming legacy`, the CLI default). Check one entity id under
+**Settings → Devices → BMS 1** to see which you have. The add-on auto-install
+always uses `device`.
 
 ## 1. Generate the YAML
 
@@ -93,11 +141,12 @@ every push/PR:
 1. **Lint** `generate.py` + `check_entities.py` with the repo's ruff config.
 2. **Sync** — regenerates the YAML and fails if the committed `out/` /
    `packages/` differ (someone edited the generator but didn't regenerate).
-3. **Entity drift** — `check_entities.py` reconciles the dashboard's references
-   against the bridge's own entity table (`jkbms2mqtt.entities`) at the
-   `(domain, object_id)` level and fails if the bridge adds/removes/renames an
-   entity the dashboard doesn't track, or the dashboard references an entity the
-   bridge no longer publishes.
+3. **Entity drift** — `check_entities.py --naming {legacy,device}` reconciles the
+   dashboard's references against the bridge's own entity table
+   (`jkbms2mqtt.entities`) at the `(domain, object_id)` level, in **both** naming
+   modes, and fails if the bridge adds/removes/renames an entity the dashboard
+   doesn't track, or the dashboard references an entity the bridge no longer
+   publishes.
 
 Run the guard locally:
 

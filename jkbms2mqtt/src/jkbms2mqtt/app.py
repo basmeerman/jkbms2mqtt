@@ -10,10 +10,12 @@ from __future__ import annotations
 import asyncio
 import logging
 import signal
+from pathlib import Path
 
 from aiomqtt import Client as MqttClient
 from aiomqtt import Will
 
+from jkbms2mqtt import dashboard
 from jkbms2mqtt.bms_runner import BmsRunner
 from jkbms2mqtt.config import Settings, load_settings
 from jkbms2mqtt.entities import writable_by_command_topic_suffix
@@ -21,6 +23,10 @@ from jkbms2mqtt.transport import build_client, connect_with_backoff
 from jkbms2mqtt.write_executor import WriteExecutor, WriteRequest
 
 logger = logging.getLogger(__name__)
+
+# Home Assistant's config dir, mounted into the add-on via the
+# `homeassistant_config` map in config.yaml.
+HA_CONFIG_DIR = Path("/homeassistant")
 
 
 def configure_logging(settings: Settings) -> None:
@@ -136,6 +142,32 @@ async def run(settings: Settings) -> None:  # pragma: no cover - top-level glue
     client.close()
 
 
+def _install_dashboard(  # pragma: no cover - add-on glue
+    settings: Settings, config_dir: Path = HA_CONFIG_DIR
+) -> None:
+    """Write the auto-install dashboard + package into the HA config dir.
+
+    Best-effort: a write failure (e.g. the homeassistant_config map is absent in
+    a standalone container) is logged, never fatal. Uses ``device`` naming —
+    what a fresh install publishes — and one cell count for the whole bank.
+    """
+    cells = {n: settings.dashboard_cells for n in settings.bms_ids}
+    try:
+        dash_path, pkg_path = dashboard.install(config_dir, settings.bms_ids, cells)
+    except OSError as exc:
+        logger.warning("install_dashboard: could not write dashboard files: %s", exc)
+        return
+    logger.info(
+        "install_dashboard: wrote %s and %s — see DOCS.md for the one-time "
+        "configuration.yaml block to show it in the sidebar",
+        dash_path,
+        pkg_path,
+    )
+
+
 def main() -> None:  # pragma: no cover - entrypoint
     settings = load_settings()
+    configure_logging(settings)
+    if settings.install_dashboard:
+        _install_dashboard(settings)
     asyncio.run(run(settings))

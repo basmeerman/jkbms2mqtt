@@ -57,6 +57,8 @@ Two supported transports between the bus and this add-on:
 | `enable_safety_writes` | `false` | Allow writes to safety-critical thresholds (OVP/UVP, max charge/discharge current, OTP/UTP). Off by default — a wrong value here can damage cells. |
 | `log_level` | `info` | Dropdown: `debug`, `info`, `warning`, `error`. |
 | `recording_enabled` | `false` | When on, every Modbus transaction is logged to the add-on log at DEBUG (no separate file). |
+| `install_dashboard` | `true` | Auto-write a ready-made Lovelace dashboard + bank-aggregates package into `<config>/jkbms2mqtt/` on startup. See [Dashboard](#dashboard) below. |
+| `dashboard_cells` | `16` | Cells per pack for that generated dashboard (homogeneous bank). Leave at your largest pack; unused cell rows just show *Unavailable*. |
 
 ## Verifying it works
 
@@ -75,6 +77,53 @@ for every BMS that's responding.
 Devices appear under **Settings → Devices** as `BMS_1`, `BMS_2`, …, one per
 configured `bms_ids` entry. Each device exposes the full set of entities
 documented in [docs/ENTITIES.md](docs/ENTITIES.md).
+
+## Dashboard
+
+With `install_dashboard: true` (the default) the add-on writes a complete
+multi-pack Lovelace dashboard and a bank-aggregates package into your Home
+Assistant config directory every time it starts:
+
+```
+<config>/jkbms2mqtt/dashboard.yaml
+<config>/jkbms2mqtt/packages/jkbms_aggregates.yaml
+```
+
+It is generated from your `bms_ids` and `dashboard_cells`, so it always matches
+your setup. Home Assistant can't let an add-on register a dashboard for you, so
+there is a small one-time setup:
+
+**1. Install the frontend cards** (once) via [HACS](https://hacs.xyz/) → Frontend,
+then restart HA: **Mushroom**, **bar-card**, **entity-progress-card**,
+**stack-in-card**. (History uses the built-in graph card.)
+
+**2. Add this block to `configuration.yaml`** (once), then restart HA:
+
+```yaml
+homeassistant:
+  packages: !include_dir_named jkbms2mqtt/packages
+lovelace:
+  dashboards:
+    jkbms2mqtt:
+      mode: yaml
+      title: JK-BMS
+      icon: mdi:battery
+      show_in_sidebar: true
+      filename: jkbms2mqtt/dashboard.yaml
+```
+
+A **JK-BMS** dashboard then appears in the sidebar and *self-updates* — change
+`bms_ids` and restart the add-on, and it regenerates with no re-paste.
+
+> **Existing installs (entity ids like `sensor.bms_1_total_pack_voltage`):** the
+> auto-installed dashboard targets the ids a *fresh* install publishes
+> (`sensor.bms_1_device_total_voltage`). If your HA already shows the older
+> name-slug ids (they're "sticky" and never auto-rename), set
+> `install_dashboard: false` and use the manual generator with `--naming legacy`
+> from the [`dashboards/`](https://github.com/basmeerman/jkbms2mqtt/tree/main/dashboards)
+> folder instead.
+
+To opt out entirely, set `install_dashboard: false`; nothing is written.
 
 ## Writes
 
