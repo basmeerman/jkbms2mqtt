@@ -96,22 +96,3 @@ publishes a JSON message on `<bms_name>/error`:
   (`0x1200/120`, `0x1278/50`, `0x12F0/16`). Failures of the second or third
   block are non-fatal — the bridge fills zeros for the missing fields and
   publishes whatever it has.
-
-## Migrating from the Jean-Luc-style add-on
-
-The topic suffixes (`Total_Voltage_V`, `Cell_N_volt`, `Mos_temp`, …) match
-the v4.0.0 English convention used by that add-on. Existing dashboards and
-automations keyed on `BMS_<n>/…` keep working as long as:
-
-- You set `bms_name_prefix: BMS` (the default) in this add-on's config.
-- The slave IDs in `bms_ids` match the DIP-switch addresses you were already
-  using.
-
-Things to set on each BMS via its display or BLE app before this add-on can
-talk to it:
-
-- **UART1 protocol** = `001 — JK BMS RS485 Modbus V1.0` (the standard
-  protocol). This add-on does not implement the proprietary master-mode
-  protocol some older add-ons use.
-- **DIP-switch ID** unique per BMS, in `1..15`. Address `0` is master-mode
-  and is not used here.
