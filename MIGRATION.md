@@ -115,25 +115,3 @@ talk to it:
   protocol some older add-ons use.
 - **DIP-switch ID** unique per BMS, in `1..15`. Address `0` is master-mode
   and is not used here.
-
-If you have retained MQTT messages under legacy French topic names
-(`Tension_Totale_volt`, `Sonde_X_temp`, etc.) and want to preserve HA's history
-continuity, the bridge itself does not rewrite retained messages — you can do
-it manually with `mosquitto_pub`:
-
-```bash
-BMS=BMS_1
-declare -A RENAMES=(
-  [Tension_Totale_volt]=Total_Voltage_V
-  [Courant_total]=Total_Current_A
-  [Puissance_Totale]=Total_Power_W
-  # …extend as needed…
-)
-for old in "${!RENAMES[@]}"; do
-  new=${RENAMES[$old]}
-  value=$(mosquitto_sub -h "$MQTT_HOST" -t "$BMS/$old" -C 1 -W 1 || echo "")
-  if [[ -n "$value" ]]; then
-    mosquitto_pub -h "$MQTT_HOST" -r -t "$BMS/$new" -m "$value"
-  fi
-done
-```
