@@ -4,10 +4,36 @@ Generated, static Lovelace dashboards for the packs published by this add-on.
 One **Overview** of every pack plus a per-pack **detail subview** (Live, Cells,
 Diagnostics, Controls, History).
 
-These target **this bridge's** real entity ids (`<domain>.bms_<n>_<slug>`,
-e.g. `sensor.bms_1_total_pack_voltage`), verified against a live install. They
+They target **this bridge's** entity ids, verified against a live install, and
 are *not* compatible with other JK-BMS add-ons that name entities differently.
-See [`PLAN.md`](PLAN.md) for the design and the verified naming map.
+See [`PLAN.md`](PLAN.md) for the design and the entity-naming map.
+
+## What it looks like
+
+### Overview — the whole bank at a glance
+
+![Overview](docs/batterybank_overview.png)
+
+A full-width **Bank summary** row — total power, total current, hottest pack,
+lowest-SoC pack, and an alarm indicator (temperature / SoC / alarm each name the
+reporting BMS) — sits above one tile per pack: SoC bar, Voltage / Power / Current
+gauges, average / delta / min cell, MOS temperature, cycle count, and an alarm
+chip. Offline packs hide automatically. Tap a pack heading to open its detail page.
+
+### Per-pack detail
+
+Each pack opens a subview with five sections. **Live**, **Cells** (a colour-coded
+per-cell voltage table — highest cell blue, lowest red — plus a resistance table),
+and **Diagnostics** + **Nameplate**:
+
+![Pack detail — Live, Cells, Diagnostics](docs/bms_1a.png)
+
+Scrolling down: **Controls** (editable `number`/`switch` settings, shown only
+when the add-on's write tiers are enabled) and **History** graphs:
+
+![Pack detail — Controls (basic) and History](docs/bms_1b.png)
+![Pack detail — Safety thresholds and Temperatures history](docs/bms_1c.png)
+![Pack detail — Safety thresholds, continued](docs/bms_1d.png)
 
 ## 1. Generate the YAML
 
