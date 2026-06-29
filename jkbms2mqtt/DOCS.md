@@ -1,4 +1,8 @@
-# jkbms2mqtt
+# jkbms2mqtt — add-on manual
+
+The operating manual for the add-on (also shown in Home Assistant's add-on
+**Documentation** tab). New here? Start with the [repository README](../README.md)
+for the quick get-started; this manual is the full reference.
 
 A Python service that reads one or more JK-BMS battery packs over RS485 using
 the standard **JK BMS RS485 Modbus V1.0 / V1.1** protocol and publishes their
