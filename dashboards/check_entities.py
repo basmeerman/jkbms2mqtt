@@ -25,11 +25,12 @@ Exit code 0 = in sync, 1 = drift (prints the offending entities).
 
 from __future__ import annotations
 
+import argparse
 import re
 import sys
 from pathlib import Path
 
-import generate  # the dashboard generator, imported for its SLUG map + cell rules
+from jkbms2mqtt import dashboard as generate  # SLUG map + cell rules (the real generator)
 from jkbms2mqtt.entities import (
     CELL_STATS_SENSORS,
     FIXED_SENSORS,
@@ -74,8 +75,10 @@ def bridge_entities() -> set[tuple[str, str]]:
     return out
 
 
-def _slug_to_object_id(slug: str) -> str:
+def _slug_to_object_id(slug: str, naming: str) -> str:
     """Reverse the generator's naming: real entity slug -> bridge object_id."""
+    if naming == "device":
+        return slug.removeprefix("device_")
     if m := re.match(r"^cell_(\d+)_voltage$", slug):
         return f"cell_{m.group(1)}_volt"
     if m := re.match(r"^cell_(\d+)_internal_resistance$", slug):
@@ -83,29 +86,53 @@ def _slug_to_object_id(slug: str) -> str:
     return _INV_SLUG.get(slug, slug)
 
 
-def dashboard_entities() -> set[tuple[str, str]]:
-    """Every (domain, object_id) the generated dashboard + package reference.
+def _dashboard_texts(naming: str) -> list[str]:
+    """The dashboard + package YAML to scan for the given naming mode.
 
-    Scans BMS_1 references across both files; the bank aggregates
-    (``*.jkbms_*``) don't match the ``bms_1_`` prefix and are correctly ignored.
+    ``legacy`` reads the committed sample (the canonical artifact); ``device``
+    builds in-memory (the add-on's auto-install output isn't committed).
+    """
+    if naming == "legacy":
+        return [
+            (HERE / "out/jkbms2mqtt-dashboard.yaml").read_text(),
+            (HERE / "packages/jkbms_aggregates.yaml").read_text(),
+        ]
+    generate._set_naming("device")
+    return [
+        generate.dump_yaml(generate.build_dashboard([1], {1: CELLS})),
+        generate.dump_yaml(generate.aggregates_package([1])),
+    ]
+
+
+def dashboard_entities(naming: str) -> set[tuple[str, str]]:
+    """Every (domain, object_id) the dashboard + package reference.
+
+    Scans BMS_1 references; the bank aggregates (``*.jkbms_*``) don't match the
+    ``bms_1_`` prefix and are correctly ignored.
     """
     out: set[tuple[str, str]] = set()
-    for name in ("out/jkbms2mqtt-dashboard.yaml", "packages/jkbms_aggregates.yaml"):
-        text = (HERE / name).read_text()
+    for text in _dashboard_texts(naming):
         for domain, slug in _REF.findall(text):
-            out.add((domain, _slug_to_object_id(slug)))
+            out.add((domain, _slug_to_object_id(slug, naming)))
     return out
 
 
 def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--naming", choices=["legacy", "device"], default="legacy")
+    args = ap.parse_args()
+
     bridge = bridge_entities()
-    dash = dashboard_entities()
+    dash = dashboard_entities(args.naming)
 
     missing = sorted(bridge - dash - ALLOW_MISSING)  # bridge has, dashboard lacks
     unknown = sorted(dash - bridge)  # dashboard refs, bridge doesn't publish
 
     if not missing and not unknown:
-        print(f"OK: dashboard references all {len(bridge)} verified bridge entities, no extras.")
+        print(
+            f"OK ({args.naming}): dashboard references all {len(bridge)} "
+            "verified bridge entities, no extras."
+        )
         return 0
 
     if missing:

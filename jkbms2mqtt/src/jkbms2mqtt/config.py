@@ -76,6 +76,14 @@ class Settings(BaseModel):
     log_level: LogLevel = LogLevel.INFO
     recording_enabled: bool = False
 
+    # Auto-install the Lovelace dashboard + bank-aggregates package into the HA
+    # config dir on startup (writes to <config>/jkbms2mqtt/). Default on for a
+    # near-zero-setup experience; needs the homeassistant_config map. See DOCS.md.
+    install_dashboard: bool = True
+    # Cells per pack used when generating that dashboard (homogeneous bank). Mixed
+    # banks: leave at the max; unused cell rows simply show Unavailable.
+    dashboard_cells: Annotated[int, Field(ge=1, le=32)] = 16
+
     @field_validator("bms_ids", mode="before")
     @classmethod
     def _parse_bms_ids(cls, v: object) -> object:

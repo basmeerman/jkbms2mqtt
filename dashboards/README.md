@@ -35,6 +35,28 @@ when the add-on's write tiers are enabled) and **History** graphs:
 ![Pack detail — Safety thresholds and Temperatures history](docs/bms_1c.png)
 ![Pack detail — Safety thresholds, continued](docs/bms_1d.png)
 
+## Two ways to install
+
+- **Auto-install (recommended, new installs).** The add-on writes this
+  dashboard + package into `<config>/jkbms2mqtt/` on startup
+  (`install_dashboard: true`, the default) and a one-time `configuration.yaml`
+  block shows it in the sidebar — self-updating, no re-paste. See
+  [DOCS.md → Dashboard](../jkbms2mqtt/DOCS.md#dashboard). You still install the
+  HACS cards (below).
+- **Manual generate + paste (this folder).** Use the generator directly — for
+  existing installs whose entity ids are the "sticky" legacy `…_total_pack_voltage`
+  form, or if you'd rather not let the add-on write to your config dir. Steps
+  1–4 below.
+
+### Entity-naming modes
+
+A *fresh* install publishes `sensor.bms_<n>_device_<object_id>` ids
+(`--naming device`). Installs predating the add-on's `object_id` discovery kept
+the legacy `sensor.bms_<n>_<slug>` ids — HA never auto-renames them, so they're
+"sticky" (`--naming legacy`, the CLI default). Check one entity id under
+**Settings → Devices → BMS 1** to see which you have. The add-on auto-install
+always uses `device`.
+
 ## 1. Generate the YAML
 
 The dashboard is generated from your actual `bms_ids` so non-contiguous ids and
@@ -119,11 +141,12 @@ every push/PR:
 1. **Lint** `generate.py` + `check_entities.py` with the repo's ruff config.
 2. **Sync** — regenerates the YAML and fails if the committed `out/` /
    `packages/` differ (someone edited the generator but didn't regenerate).
-3. **Entity drift** — `check_entities.py` reconciles the dashboard's references
-   against the bridge's own entity table (`jkbms2mqtt.entities`) at the
-   `(domain, object_id)` level and fails if the bridge adds/removes/renames an
-   entity the dashboard doesn't track, or the dashboard references an entity the
-   bridge no longer publishes.
+3. **Entity drift** — `check_entities.py --naming {legacy,device}` reconciles the
+   dashboard's references against the bridge's own entity table
+   (`jkbms2mqtt.entities`) at the `(domain, object_id)` level, in **both** naming
+   modes, and fails if the bridge adds/removes/renames an entity the dashboard
+   doesn't track, or the dashboard references an entity the bridge no longer
+   publishes.
 
 Run the guard locally:
 

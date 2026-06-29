@@ -54,7 +54,10 @@ filterwarnings = [
 [tool.coverage.run]
 branch = true
 source = ["src/jkbms2mqtt"]
-omit = ["src/jkbms2mqtt/__main__.py"]
+# dashboard.py is dashboard-generation tooling (Lovelace YAML assembly), not
+# core bridge logic. It is validated by the `dashboards` CI job (lint + generate
+# + entity-drift check), so it is excluded from the 100% runtime-coverage gate.
+omit = ["src/jkbms2mqtt/__main__.py", "src/jkbms2mqtt/dashboard.py"]
 
 [tool.coverage.report]
 show_missing = true
@@ -110,6 +113,13 @@ strict = true
 warn_unreachable = true
 disallow_any_unimported = true
 pretty = true
+
+# dashboard.py assembles deeply-nested Lovelace card dicts; bare `dict` (i.e.
+# dict[str, Any]) is the honest type there. Relax generic-arg strictness for
+# this generator module only — the rest of the package stays fully strict.
+[[tool.mypy.overrides]]
+module = "jkbms2mqtt.dashboard"
+disallow_any_generics = false
 
 # mutmut 3.x config (TOML arrays, not the 2.x comma-strings). Test selection is
 # the unit + property suites (integration tests aren't useful for mutation and

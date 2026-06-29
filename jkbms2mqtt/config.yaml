@@ -20,6 +20,9 @@ services:
   - mqtt:want
 map:
   - share:rw
+  # Write access to the HA config dir (/homeassistant) so the add-on can
+  # auto-install the Lovelace dashboard + package (install_dashboard option).
+  - homeassistant_config:rw
 
 # Every option below has a default. None are nullable / optional — that's
 # what suppresses the "Show unused optional configuration options" toggle in
@@ -43,6 +46,8 @@ options:
   debug_unverified_fields: false
   log_level: info
   recording_enabled: false
+  install_dashboard: true
+  dashboard_cells: 16
 
 schema:
   transport: list(tcp_gateway|usb_serial)
@@ -65,3 +70,5 @@ schema:
   debug_unverified_fields: bool
   log_level: list(debug|info|warning|error)
   recording_enabled: bool
+  install_dashboard: bool
+  dashboard_cells: int(1,32)
