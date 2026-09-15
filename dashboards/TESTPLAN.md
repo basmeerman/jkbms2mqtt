@@ -42,11 +42,12 @@ This confirms HA created the *exact* ids the dashboard expects, before importing
 
 | Line | Expected | If not… |
 |---|---|---|
-| `BMS n read-only: 60/60 present` | 60/60 for every online pack (16S) | A whole pack at `0/60` → that pack is offline or named differently. A **few** missing across *all* packs → an object_id mismatch; report it to me with the `not resolving:` list. |
+| `BMS n read-only: 61/61 present` | 61/61 for every online pack (16S) | A whole pack at `0/61` → that pack is offline or named differently. A **few** missing across *all* packs → an object_id mismatch; report it to me with the `not resolving:` list. Only `last_seen` missing → bridge older than 2.1.0, or HA registered it under a different id (rename it to `sensor.bms_<n>_device_last_seen`). |
 | `BMS n controls …: 0/34` | `0/34` if write tiers are **off**; `34/34` if both **on** | Matches your Phase 0.4 note. Partial (e.g. `11/34`) means only `enable_basic_writes` is on — expected. |
 | `Bank aggregates: 0/4` | `0/4` now (package not installed yet) | Becomes `4/4` after Phase 3. |
 
-> Cell count: a 16S pack contributes 16 `cell_*_volt` + 16 `cell_*_ohm`. For an
+> Count: 26 pack sensors (incl. `last_seen`) + 3 binary sensors + 2 per cell.
+> A 16S pack contributes 16 `cell_*_volt` + 16 `cell_*_ohm`. For an
 > 8S pack regenerate with the right `--cells` or expect `cell_9..16` to miss.
 > Temperature probes (`probe_1..5_temp`) are intentionally **not** in this
 > check — unwired probes show Unavailable on the dashboard, which is normal.
