@@ -16,8 +16,15 @@ device page sorts it into one of four sections:
 |---|---|---|
 | **Sensors** | (none) | Primary read-only telemetry — the values you check on the device page every day |
 | **Controls** | (none) | A writable entity with no category. Currently empty: the charging / discharging / balance switches are spec-defined configuration parameters (they tune device behaviour rather than being the pack's main power switch), so they land under **Configuration** instead. |
-| **Configuration** | `config` | Every writable setting + every packed-bit mode toggle; settable thresholds, current limits, OTP / UTP thresholds, etc. When the tier is off the entity is published read-only — but still categorised as Configuration. |
-| **Diagnostics** | `diagnostic` | Read-only debug / lifetime / static info: model, hw, sw, serial number, cycle count, cycle capacity, runtime, SoH, raw alarm bitmap, present cell count, per-cell internal resistances |
+| **Configuration** | `config` | Every writable setting + every packed-bit mode toggle while its write tier is on; settable thresholds, current limits, OTP / UTP thresholds, etc. |
+| **Diagnostics** | `diagnostic` | Read-only debug / lifetime / static info: model, hw, sw, serial number, cycle count, cycle capacity, runtime, SoH, raw alarm bitmap, present cell count, per-cell internal resistances. Also every setting whose write tier is off: it is then a sensor, and Home Assistant does not allow `config` on sensors. |
+
+When a tier is toggled, a setting moves between `sensor` and `number` (or
+`binary_sensor` and `switch`). The bridge clears the retained discovery config
+of the other type on every start, so Home Assistant removes the old entity
+instead of keeping it as unavailable. The same happens for cells above the
+present cell count and for unverified entities when `debug_unverified_fields`
+is turned off.
 
 See HA's own definition at
 [developers.home-assistant.io/docs/core/entity/#categorizing-entities](https://developers.home-assistant.io/docs/core/entity/#categorizing-entities).
@@ -132,7 +139,8 @@ value changes, so it cannot tell a steady reading from a stale one.
 
 ## Read / write — basic tier
 
-All entries land in HA's **Configuration** section (`entity_category: config`).
+All entries land in HA's **Configuration** section (`entity_category: config`)
+when the tier is on, and in **Diagnostics** when it is off.
 All addresses calibrated against spec V1.1 and verified against
 `scripts/captures/BMS_1.txt`. Visible as `number` / `switch` when
 `enable_basic_writes: true`, as `sensor` / `binary_sensor` otherwise (current
@@ -157,7 +165,8 @@ being the device's main on/off switch.
 
 ### Unverified packed-bit toggles (basic, hidden by default)
 
-All in HA's **Configuration** section (`entity_category: config`). The
+In HA's **Configuration** section (`entity_category: config`) when the tier
+is on, **Diagnostics** when it is off. The
 packed-bit register at `0x1114` holds several boolean flags but the bit
 positions are not yet confirmed. Marked `verified=False`; visible only when
 `debug_unverified_fields: true`.
@@ -170,7 +179,8 @@ positions are not yet confirmed. Marked `verified=False`; visible only when
 
 ## Read / write — safety tier
 
-All entries land in HA's **Configuration** section (`entity_category: config`).
+All entries land in HA's **Configuration** section (`entity_category: config`)
+when the tier is on, and in **Diagnostics** when it is off.
 All addresses and encodings verified against `scripts/captures/BMS_1.txt` and
 the BMS app screenshots. Visible as `number` when `enable_safety_writes: true`,
 as `sensor` otherwise.

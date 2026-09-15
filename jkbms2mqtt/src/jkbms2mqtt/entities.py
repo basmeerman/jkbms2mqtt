@@ -89,9 +89,10 @@ class WritableEntity:
     """A writable parameter backed by a single 32-bit register (function 0x10).
 
     Defaults ``entity_category`` to "config" — every writable setting tunes
-    device configuration and therefore belongs in HA's Configuration section,
-    regardless of whether it's currently surfaced as a writable number/switch
-    (tier on) or as a read-only sensor mirroring the same setting (tier off).
+    device configuration and therefore belongs in HA's Configuration section
+    while it is surfaced as a number/switch (tier on). HA rejects "config" on
+    sensors, so the read-only mirror (tier off) is published as "diagnostic";
+    see ``mqtt._read_only_category``.
     """
 
     object_id: str
@@ -108,7 +109,8 @@ class PackedBitEntity:
     """A writable boolean stored as one bit inside the packed register 0x1114.
 
     Same reasoning as ``WritableEntity``: a device-mode toggle is always a
-    configuration entity, so default ``entity_category`` to "config".
+    configuration entity, so default ``entity_category`` to "config" (again
+    "diagnostic" when published read-only).
     """
 
     object_id: str
