@@ -18,7 +18,13 @@ A full-width **Bank summary** row — total power, total current, hottest pack,
 lowest-SoC pack, and an alarm indicator (temperature / SoC / alarm each name the
 reporting BMS) — sits above one tile per pack: SoC bar, Voltage / Power / Current
 gauges, average / delta / min cell, MOS temperature, cycle count, and an alarm
-chip. Offline packs hide automatically. Tap a pack heading to open its detail page.
+chip. Tap a pack heading to open its detail page.
+
+Every tile starts with a **Last seen** row ("Last seen · 12 seconds ago"). Its
+icon is green while data is arriving and fades linearly to grey over 5 minutes
+without a successful poll, so a pack that dropped off the bus stays on screen,
+visibly greyed out, instead of silently showing old numbers. Only packs that
+have *never* reported are hidden.
 
 ### Per-pack detail
 
@@ -101,9 +107,14 @@ History uses the built-in `history-graph` card (no HACS needed). Gauges,
 2. Open it, top-right ⋮ → **Edit dashboard** → ⋮ → **Raw configuration editor**.
 3. Replace the contents with `out/jkbms2mqtt-dashboard.yaml`. Save.
 
-Overview tiles only render for packs that are actually publishing
-(`has_value(sensor.bms_<n>_total_pack_voltage)`), so missing ids stay hidden.
-Tap a pack's heading to open its detail subview.
+Overview tiles only render for packs that have reported at least once
+(`sensor.bms_<n>_device_last_seen` is neither `unknown` nor `unavailable`), so
+unused ids stay hidden while a pack that goes silent stays visible and greys
+out. Tap a pack's heading to open its detail subview, whose **Live** section
+shows the same freshness row plus the exact time of the last successful poll.
+
+`last_seen` is a newer entity, so it gets the `…_device_last_seen` id on legacy
+installs too — both naming modes reference it that way.
 
 ## 4. Install the aggregates package (optional but recommended)
 

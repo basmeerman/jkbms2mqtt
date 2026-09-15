@@ -17,10 +17,12 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 from jkbms2mqtt.config import Settings
 from jkbms2mqtt.entities import (
+    BRIDGE_SENSORS,
     CELL_STATS_SENSORS,
     FIXED_SENSORS,
     LIVE_BINARY_SENSORS,
@@ -42,6 +44,10 @@ from jkbms2mqtt.protocol.jk_settings import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Retained LWT for the bridge process: ``online`` on connect, ``offline`` when
+# the MQTT session dies. Payloads match HA's availability defaults.
+BRIDGE_AVAILABILITY_TOPIC = "jkbms2mqtt/availability"
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,10 +93,12 @@ def _discovery_topic(
 def _base_payload(
     bms_name: str,
     *,
+    component: Component,
     object_id: str,
     name: str,
     topic_suffix: str,
     entity_category: str | None,
+    follows_bridge_availability: bool = True,
 ) -> dict[str, Any]:
     """The fields every discovery payload shares, regardless of component.
 
@@ -98,6 +106,11 @@ def _base_payload(
     "primary entity"), so passing ``None`` leaves it off the payload. Every
     ``discovery_for_*`` builder starts from this so the common shape — and the
     optional ``entity_category`` — lives in exactly one place.
+
+    The suggested entity id is sent twice: ``object_id`` for HA before 2025.10,
+    ``default_entity_id`` (full ``domain.object_id``) for HA 2025.10+. HA 2026.4
+    dropped ``object_id`` entirely; without ``default_entity_id`` new entities
+    fall back to a name slug. Both only affect first registration.
     """
     unique_id = f"{bms_name}_device_{object_id}"
     payload: dict[str, Any] = {
@@ -105,8 +118,11 @@ def _base_payload(
         "state_topic": _state_topic(bms_name, topic_suffix),
         "unique_id": unique_id,
         "object_id": unique_id,
+        "default_entity_id": f"{component.value}.{unique_id.lower()}",
         "device": _device_info(bms_name),
     }
+    if follows_bridge_availability:
+        payload["availability_topic"] = BRIDGE_AVAILABILITY_TOPIC
     if entity_category is not None:
         payload["entity_category"] = entity_category
     return payload
@@ -117,10 +133,12 @@ def discovery_for_read_only(
 ) -> DiscoveryMessage:
     payload = _base_payload(
         bms_name,
+        component=entity.component,
         object_id=entity.object_id,
         name=entity.description,
         topic_suffix=entity.topic_suffix,
         entity_category=entity.entity_category,
+        follows_bridge_availability=entity.follows_bridge_availability,
     )
     if entity.device_class:
         payload["device_class"] = entity.device_class
@@ -160,6 +178,7 @@ def discovery_for_writable(
 
     payload = _base_payload(
         bms_name,
+        component=component,
         object_id=entity.object_id,
         name=entity.description,
         topic_suffix=entity.topic_suffix,
@@ -197,6 +216,7 @@ def discovery_for_packed_bit(
     component = Component.SWITCH if writable else Component.BINARY_SENSOR
     payload = _base_payload(
         bms_name,
+        component=component,
         object_id=entity.object_id,
         name=entity.bit.description,
         topic_suffix=entity.topic_suffix,
@@ -258,6 +278,8 @@ def build_discovery_messages(
     for e in FIXED_SENSORS:
         if not e.verified and not debug:  # pragma: no branch - no unverified FIXED entries today
             continue  # pragma: no cover
+        messages.append(discovery_for_read_only(e, bms_name, discovery_prefix=discovery_prefix))
+    for e in BRIDGE_SENSORS:
         messages.append(discovery_for_read_only(e, bms_name, discovery_prefix=discovery_prefix))
 
     for w in WRITABLE_ENTITIES:
@@ -323,6 +345,18 @@ def state_messages_from_live(
     for i, r in enumerate(live.cell_resistances_ohm):
         out.append((f"{bms_name}/Cell_{i + 1}_ohm", _format(r, 3)))
     return out
+
+
+def state_message_last_seen(bms_name: str, when: datetime) -> tuple[str, str]:
+    """``(topic, payload)`` for the ``last_seen`` timestamp sensor.
+
+    HA's ``timestamp`` device class needs an ISO 8601 string with a timezone,
+    so a naive datetime is rejected rather than silently published.
+    """
+    if when.tzinfo is None:
+        raise ValueError("last_seen timestamp must be timezone-aware")
+    (entity,) = BRIDGE_SENSORS
+    return _state_topic(bms_name, entity.topic_suffix), when.isoformat(timespec="seconds")
 
 
 def state_messages_from_static(info: JkStaticInfo, bms_name: str) -> list[tuple[str, str]]:

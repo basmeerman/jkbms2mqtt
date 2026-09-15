@@ -71,6 +71,20 @@ views:
         tap_action:
           action: navigate
           navigation_path: bms-1
+      - type: custom:mushroom-template-card
+        primary: Last seen
+        secondary: '{% if states(''sensor.bms_1_device_last_seen'') in ['''', ''unknown'', ''unavailable'']
+          %}Never{% else %}{{ relative_time(as_datetime(states(''sensor.bms_1_device_last_seen''))) }}
+          ago{% endif %}'
+        icon: mdi:access-point-network
+        icon_color: '{% if states(''sensor.bms_1_device_last_seen'') in ['''', ''unknown'', ''unavailable'']
+          %}#9e9e9e{% else %}{% set f = ((now() - as_datetime(states(''sensor.bms_1_device_last_seen''))).total_seconds()
+          / 300) %}{% set f = [[f, 0] | max, 1] | min %}{{ ''#%02x%02x%02x'' | format((65 + (158 - 65)
+          * f) | round | int, (205 + (158 - 205) * f) | round | int, (82 + (158 - 82) * f) | round | int)
+          }}{% endif %}'
+        entity: sensor.bms_1_device_last_seen
+        tap_action:
+          action: more-info
       - type: custom:bar-card
         entity: sensor.bms_1_state_of_charge
         name: SoC
@@ -159,10 +173,10 @@ views:
     column_span: 1
     visibility:
     - condition: state
-      entity: sensor.bms_1_total_pack_voltage
+      entity: sensor.bms_1_device_last_seen
       state_not: unavailable
     - condition: state
-      entity: sensor.bms_1_total_pack_voltage
+      entity: sensor.bms_1_device_last_seen
       state_not: unknown
   - type: grid
     cards:
@@ -175,6 +189,20 @@ views:
         tap_action:
           action: navigate
           navigation_path: bms-2
+      - type: custom:mushroom-template-card
+        primary: Last seen
+        secondary: '{% if states(''sensor.bms_2_device_last_seen'') in ['''', ''unknown'', ''unavailable'']
+          %}Never{% else %}{{ relative_time(as_datetime(states(''sensor.bms_2_device_last_seen''))) }}
+          ago{% endif %}'
+        icon: mdi:access-point-network
+        icon_color: '{% if states(''sensor.bms_2_device_last_seen'') in ['''', ''unknown'', ''unavailable'']
+          %}#9e9e9e{% else %}{% set f = ((now() - as_datetime(states(''sensor.bms_2_device_last_seen''))).total_seconds()
+          / 300) %}{% set f = [[f, 0] | max, 1] | min %}{{ ''#%02x%02x%02x'' | format((65 + (158 - 65)
+          * f) | round | int, (205 + (158 - 205) * f) | round | int, (82 + (158 - 82) * f) | round | int)
+          }}{% endif %}'
+        entity: sensor.bms_2_device_last_seen
+        tap_action:
+          action: more-info
       - type: custom:bar-card
         entity: sensor.bms_2_state_of_charge
         name: SoC
@@ -263,10 +291,10 @@ views:
     column_span: 1
     visibility:
     - condition: state
-      entity: sensor.bms_2_total_pack_voltage
+      entity: sensor.bms_2_device_last_seen
       state_not: unavailable
     - condition: state
-      entity: sensor.bms_2_total_pack_voltage
+      entity: sensor.bms_2_device_last_seen
       state_not: unknown
   - type: grid
     cards:
@@ -279,6 +307,20 @@ views:
         tap_action:
           action: navigate
           navigation_path: bms-3
+      - type: custom:mushroom-template-card
+        primary: Last seen
+        secondary: '{% if states(''sensor.bms_3_device_last_seen'') in ['''', ''unknown'', ''unavailable'']
+          %}Never{% else %}{{ relative_time(as_datetime(states(''sensor.bms_3_device_last_seen''))) }}
+          ago{% endif %}'
+        icon: mdi:access-point-network
+        icon_color: '{% if states(''sensor.bms_3_device_last_seen'') in ['''', ''unknown'', ''unavailable'']
+          %}#9e9e9e{% else %}{% set f = ((now() - as_datetime(states(''sensor.bms_3_device_last_seen''))).total_seconds()
+          / 300) %}{% set f = [[f, 0] | max, 1] | min %}{{ ''#%02x%02x%02x'' | format((65 + (158 - 65)
+          * f) | round | int, (205 + (158 - 205) * f) | round | int, (82 + (158 - 82) * f) | round | int)
+          }}{% endif %}'
+        entity: sensor.bms_3_device_last_seen
+        tap_action:
+          action: more-info
       - type: custom:bar-card
         entity: sensor.bms_3_state_of_charge
         name: SoC
@@ -367,10 +409,10 @@ views:
     column_span: 1
     visibility:
     - condition: state
-      entity: sensor.bms_3_total_pack_voltage
+      entity: sensor.bms_3_device_last_seen
       state_not: unavailable
     - condition: state
-      entity: sensor.bms_3_total_pack_voltage
+      entity: sensor.bms_3_device_last_seen
       state_not: unknown
   - type: grid
     cards:
@@ -383,6 +425,20 @@ views:
         tap_action:
           action: navigate
           navigation_path: bms-4
+      - type: custom:mushroom-template-card
+        primary: Last seen
+        secondary: '{% if states(''sensor.bms_4_device_last_seen'') in ['''', ''unknown'', ''unavailable'']
+          %}Never{% else %}{{ relative_time(as_datetime(states(''sensor.bms_4_device_last_seen''))) }}
+          ago{% endif %}'
+        icon: mdi:access-point-network
+        icon_color: '{% if states(''sensor.bms_4_device_last_seen'') in ['''', ''unknown'', ''unavailable'']
+          %}#9e9e9e{% else %}{% set f = ((now() - as_datetime(states(''sensor.bms_4_device_last_seen''))).total_seconds()
+          / 300) %}{% set f = [[f, 0] | max, 1] | min %}{{ ''#%02x%02x%02x'' | format((65 + (158 - 65)
+          * f) | round | int, (205 + (158 - 205) * f) | round | int, (82 + (158 - 82) * f) | round | int)
+          }}{% endif %}'
+        entity: sensor.bms_4_device_last_seen
+        tap_action:
+          action: more-info
       - type: custom:bar-card
         entity: sensor.bms_4_state_of_charge
         name: SoC
@@ -471,10 +527,10 @@ views:
     column_span: 1
     visibility:
     - condition: state
-      entity: sensor.bms_4_total_pack_voltage
+      entity: sensor.bms_4_device_last_seen
       state_not: unavailable
     - condition: state
-      entity: sensor.bms_4_total_pack_voltage
+      entity: sensor.bms_4_device_last_seen
       state_not: unknown
   - type: grid
     cards:
@@ -487,6 +543,20 @@ views:
         tap_action:
           action: navigate
           navigation_path: bms-5
+      - type: custom:mushroom-template-card
+        primary: Last seen
+        secondary: '{% if states(''sensor.bms_5_device_last_seen'') in ['''', ''unknown'', ''unavailable'']
+          %}Never{% else %}{{ relative_time(as_datetime(states(''sensor.bms_5_device_last_seen''))) }}
+          ago{% endif %}'
+        icon: mdi:access-point-network
+        icon_color: '{% if states(''sensor.bms_5_device_last_seen'') in ['''', ''unknown'', ''unavailable'']
+          %}#9e9e9e{% else %}{% set f = ((now() - as_datetime(states(''sensor.bms_5_device_last_seen''))).total_seconds()
+          / 300) %}{% set f = [[f, 0] | max, 1] | min %}{{ ''#%02x%02x%02x'' | format((65 + (158 - 65)
+          * f) | round | int, (205 + (158 - 205) * f) | round | int, (82 + (158 - 82) * f) | round | int)
+          }}{% endif %}'
+        entity: sensor.bms_5_device_last_seen
+        tap_action:
+          action: more-info
       - type: custom:bar-card
         entity: sensor.bms_5_state_of_charge
         name: SoC
@@ -575,10 +645,10 @@ views:
     column_span: 1
     visibility:
     - condition: state
-      entity: sensor.bms_5_total_pack_voltage
+      entity: sensor.bms_5_device_last_seen
       state_not: unavailable
     - condition: state
-      entity: sensor.bms_5_total_pack_voltage
+      entity: sensor.bms_5_device_last_seen
       state_not: unknown
   - type: grid
     cards:
@@ -591,6 +661,20 @@ views:
         tap_action:
           action: navigate
           navigation_path: bms-6
+      - type: custom:mushroom-template-card
+        primary: Last seen
+        secondary: '{% if states(''sensor.bms_6_device_last_seen'') in ['''', ''unknown'', ''unavailable'']
+          %}Never{% else %}{{ relative_time(as_datetime(states(''sensor.bms_6_device_last_seen''))) }}
+          ago{% endif %}'
+        icon: mdi:access-point-network
+        icon_color: '{% if states(''sensor.bms_6_device_last_seen'') in ['''', ''unknown'', ''unavailable'']
+          %}#9e9e9e{% else %}{% set f = ((now() - as_datetime(states(''sensor.bms_6_device_last_seen''))).total_seconds()
+          / 300) %}{% set f = [[f, 0] | max, 1] | min %}{{ ''#%02x%02x%02x'' | format((65 + (158 - 65)
+          * f) | round | int, (205 + (158 - 205) * f) | round | int, (82 + (158 - 82) * f) | round | int)
+          }}{% endif %}'
+        entity: sensor.bms_6_device_last_seen
+        tap_action:
+          action: more-info
       - type: custom:bar-card
         entity: sensor.bms_6_state_of_charge
         name: SoC
@@ -679,10 +763,10 @@ views:
     column_span: 1
     visibility:
     - condition: state
-      entity: sensor.bms_6_total_pack_voltage
+      entity: sensor.bms_6_device_last_seen
       state_not: unavailable
     - condition: state
-      entity: sensor.bms_6_total_pack_voltage
+      entity: sensor.bms_6_device_last_seen
       state_not: unknown
 - title: BMS 1
   path: bms-1
@@ -696,6 +780,25 @@ views:
       heading: Live
       heading_style: title
       icon: mdi:flash
+    - type: custom:mushroom-template-card
+      primary: Last seen
+      secondary: '{% if states(''sensor.bms_1_device_last_seen'') in ['''', ''unknown'', ''unavailable'']
+        %}Never{% else %}{{ relative_time(as_datetime(states(''sensor.bms_1_device_last_seen''))) }} ago{%
+        endif %}'
+      icon: mdi:access-point-network
+      icon_color: '{% if states(''sensor.bms_1_device_last_seen'') in ['''', ''unknown'', ''unavailable'']
+        %}#9e9e9e{% else %}{% set f = ((now() - as_datetime(states(''sensor.bms_1_device_last_seen''))).total_seconds()
+        / 300) %}{% set f = [[f, 0] | max, 1] | min %}{{ ''#%02x%02x%02x'' | format((65 + (158 - 65) *
+        f) | round | int, (205 + (158 - 205) * f) | round | int, (82 + (158 - 82) * f) | round | int)
+        }}{% endif %}'
+      entity: sensor.bms_1_device_last_seen
+      tap_action:
+        action: more-info
+    - type: entities
+      entities:
+      - entity: sensor.bms_1_device_last_seen
+        name: Last successful poll
+        format: datetime
     - type: custom:entity-progress-card
       entity: sensor.bms_1_state_of_charge
       name: State of charge
@@ -1030,6 +1133,25 @@ views:
       heading: Live
       heading_style: title
       icon: mdi:flash
+    - type: custom:mushroom-template-card
+      primary: Last seen
+      secondary: '{% if states(''sensor.bms_2_device_last_seen'') in ['''', ''unknown'', ''unavailable'']
+        %}Never{% else %}{{ relative_time(as_datetime(states(''sensor.bms_2_device_last_seen''))) }} ago{%
+        endif %}'
+      icon: mdi:access-point-network
+      icon_color: '{% if states(''sensor.bms_2_device_last_seen'') in ['''', ''unknown'', ''unavailable'']
+        %}#9e9e9e{% else %}{% set f = ((now() - as_datetime(states(''sensor.bms_2_device_last_seen''))).total_seconds()
+        / 300) %}{% set f = [[f, 0] | max, 1] | min %}{{ ''#%02x%02x%02x'' | format((65 + (158 - 65) *
+        f) | round | int, (205 + (158 - 205) * f) | round | int, (82 + (158 - 82) * f) | round | int)
+        }}{% endif %}'
+      entity: sensor.bms_2_device_last_seen
+      tap_action:
+        action: more-info
+    - type: entities
+      entities:
+      - entity: sensor.bms_2_device_last_seen
+        name: Last successful poll
+        format: datetime
     - type: custom:entity-progress-card
       entity: sensor.bms_2_state_of_charge
       name: State of charge
@@ -1364,6 +1486,25 @@ views:
       heading: Live
       heading_style: title
       icon: mdi:flash
+    - type: custom:mushroom-template-card
+      primary: Last seen
+      secondary: '{% if states(''sensor.bms_3_device_last_seen'') in ['''', ''unknown'', ''unavailable'']
+        %}Never{% else %}{{ relative_time(as_datetime(states(''sensor.bms_3_device_last_seen''))) }} ago{%
+        endif %}'
+      icon: mdi:access-point-network
+      icon_color: '{% if states(''sensor.bms_3_device_last_seen'') in ['''', ''unknown'', ''unavailable'']
+        %}#9e9e9e{% else %}{% set f = ((now() - as_datetime(states(''sensor.bms_3_device_last_seen''))).total_seconds()
+        / 300) %}{% set f = [[f, 0] | max, 1] | min %}{{ ''#%02x%02x%02x'' | format((65 + (158 - 65) *
+        f) | round | int, (205 + (158 - 205) * f) | round | int, (82 + (158 - 82) * f) | round | int)
+        }}{% endif %}'
+      entity: sensor.bms_3_device_last_seen
+      tap_action:
+        action: more-info
+    - type: entities
+      entities:
+      - entity: sensor.bms_3_device_last_seen
+        name: Last successful poll
+        format: datetime
     - type: custom:entity-progress-card
       entity: sensor.bms_3_state_of_charge
       name: State of charge
@@ -1698,6 +1839,25 @@ views:
       heading: Live
       heading_style: title
       icon: mdi:flash
+    - type: custom:mushroom-template-card
+      primary: Last seen
+      secondary: '{% if states(''sensor.bms_4_device_last_seen'') in ['''', ''unknown'', ''unavailable'']
+        %}Never{% else %}{{ relative_time(as_datetime(states(''sensor.bms_4_device_last_seen''))) }} ago{%
+        endif %}'
+      icon: mdi:access-point-network
+      icon_color: '{% if states(''sensor.bms_4_device_last_seen'') in ['''', ''unknown'', ''unavailable'']
+        %}#9e9e9e{% else %}{% set f = ((now() - as_datetime(states(''sensor.bms_4_device_last_seen''))).total_seconds()
+        / 300) %}{% set f = [[f, 0] | max, 1] | min %}{{ ''#%02x%02x%02x'' | format((65 + (158 - 65) *
+        f) | round | int, (205 + (158 - 205) * f) | round | int, (82 + (158 - 82) * f) | round | int)
+        }}{% endif %}'
+      entity: sensor.bms_4_device_last_seen
+      tap_action:
+        action: more-info
+    - type: entities
+      entities:
+      - entity: sensor.bms_4_device_last_seen
+        name: Last successful poll
+        format: datetime
     - type: custom:entity-progress-card
       entity: sensor.bms_4_state_of_charge
       name: State of charge
@@ -2032,6 +2192,25 @@ views:
       heading: Live
       heading_style: title
       icon: mdi:flash
+    - type: custom:mushroom-template-card
+      primary: Last seen
+      secondary: '{% if states(''sensor.bms_5_device_last_seen'') in ['''', ''unknown'', ''unavailable'']
+        %}Never{% else %}{{ relative_time(as_datetime(states(''sensor.bms_5_device_last_seen''))) }} ago{%
+        endif %}'
+      icon: mdi:access-point-network
+      icon_color: '{% if states(''sensor.bms_5_device_last_seen'') in ['''', ''unknown'', ''unavailable'']
+        %}#9e9e9e{% else %}{% set f = ((now() - as_datetime(states(''sensor.bms_5_device_last_seen''))).total_seconds()
+        / 300) %}{% set f = [[f, 0] | max, 1] | min %}{{ ''#%02x%02x%02x'' | format((65 + (158 - 65) *
+        f) | round | int, (205 + (158 - 205) * f) | round | int, (82 + (158 - 82) * f) | round | int)
+        }}{% endif %}'
+      entity: sensor.bms_5_device_last_seen
+      tap_action:
+        action: more-info
+    - type: entities
+      entities:
+      - entity: sensor.bms_5_device_last_seen
+        name: Last successful poll
+        format: datetime
     - type: custom:entity-progress-card
       entity: sensor.bms_5_state_of_charge
       name: State of charge
@@ -2366,6 +2545,25 @@ views:
       heading: Live
       heading_style: title
       icon: mdi:flash
+    - type: custom:mushroom-template-card
+      primary: Last seen
+      secondary: '{% if states(''sensor.bms_6_device_last_seen'') in ['''', ''unknown'', ''unavailable'']
+        %}Never{% else %}{{ relative_time(as_datetime(states(''sensor.bms_6_device_last_seen''))) }} ago{%
+        endif %}'
+      icon: mdi:access-point-network
+      icon_color: '{% if states(''sensor.bms_6_device_last_seen'') in ['''', ''unknown'', ''unavailable'']
+        %}#9e9e9e{% else %}{% set f = ((now() - as_datetime(states(''sensor.bms_6_device_last_seen''))).total_seconds()
+        / 300) %}{% set f = [[f, 0] | max, 1] | min %}{{ ''#%02x%02x%02x'' | format((65 + (158 - 65) *
+        f) | round | int, (205 + (158 - 205) * f) | round | int, (82 + (158 - 82) * f) | round | int)
+        }}{% endif %}'
+      entity: sensor.bms_6_device_last_seen
+      tap_action:
+        action: more-info
+    - type: entities
+      entities:
+      - entity: sensor.bms_6_device_last_seen
+        name: Last successful poll
+        format: datetime
     - type: custom:entity-progress-card
       entity: sensor.bms_6_state_of_charge
       name: State of charge

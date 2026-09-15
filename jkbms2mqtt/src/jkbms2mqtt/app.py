@@ -19,6 +19,7 @@ from jkbms2mqtt import dashboard
 from jkbms2mqtt.bms_runner import BmsRunner
 from jkbms2mqtt.config import Settings, load_settings
 from jkbms2mqtt.entities import writable_by_command_topic_suffix
+from jkbms2mqtt.mqtt import BRIDGE_AVAILABILITY_TOPIC
 from jkbms2mqtt.transport import build_client, connect_with_backoff
 from jkbms2mqtt.write_executor import WriteExecutor, WriteRequest
 
@@ -57,7 +58,7 @@ async def run(settings: Settings) -> None:  # pragma: no cover - top-level glue
     client = build_client(settings)
     await connect_with_backoff(client)
 
-    will = Will(topic="jkbms2mqtt/availability", payload=b"offline", qos=1, retain=True)
+    will = Will(topic=BRIDGE_AVAILABILITY_TOPIC, payload=b"offline", qos=1, retain=True)
     async with MqttClient(
         hostname=settings.mqtt_host,
         port=settings.mqtt_port,
@@ -65,7 +66,7 @@ async def run(settings: Settings) -> None:  # pragma: no cover - top-level glue
         password=settings.mqtt_password or None,
         will=will,
     ) as mqtt:
-        await mqtt.publish("jkbms2mqtt/availability", b"online", qos=1, retain=True)
+        await mqtt.publish(BRIDGE_AVAILABILITY_TOPIC, b"online", qos=1, retain=True)
 
         async def publish(topic: str, payload: str, qos: int = 0, retain: bool = False) -> None:
             await mqtt.publish(topic, payload=payload, qos=qos, retain=retain)

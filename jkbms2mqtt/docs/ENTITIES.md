@@ -106,6 +106,30 @@ commanding a new value posts to `<topic>/set`.
 | `sw` | `sw_version` | **Diagnostics** | Software / firmware version |
 | `serialnb` | `serial_number` | **Diagnostics** | Serial number |
 
+### Freshness (bridge-generated)
+
+| Topic suffix | Object id | Device class | HA section | Description |
+|---|---|---|---|---|
+| `Last_seen` | `last_seen` | `timestamp` | Sensors | Bridge time (UTC, ISO 8601) of the last successful realtime poll of this BMS. Retained. |
+
+`Last_seen` only moves when the realtime block read succeeds, so its age is the
+age of every telemetry value above. It is published retained, so the age stays
+correct across bridge and Home Assistant restarts.
+
+## Availability
+
+Every entity except `last_seen` carries `availability_topic:
+jkbms2mqtt/availability` — the bridge's retained MQTT last-will. When the
+bridge process stops or loses its broker session, HA marks those entities
+**unavailable**. `last_seen` deliberately ignores it and keeps showing when data
+was last received.
+
+While the bridge runs but a single BMS stops answering, nothing is published
+for that BMS: its entities keep their last value and `last_seen` stops
+advancing. Use `last_seen` (or the dashboard's freshness indicator) to judge
+whether a reading is current — HA's own `last_updated` only changes when the
+value changes, so it cannot tell a steady reading from a stale one.
+
 ## Read / write — basic tier
 
 All entries land in HA's **Configuration** section (`entity_category: config`).
@@ -185,7 +209,7 @@ as `sensor` otherwise.
 | Topic | Direction | Description |
 |---|---|---|
 | `<bms_name>/error` | Bridge → MQTT | Structured JSON error for rejected writes |
-| `jkbms2mqtt/availability` | Bridge → MQTT | LWT `online` / `offline` for the bridge process |
+| `jkbms2mqtt/availability` | Bridge → MQTT | LWT `online` / `offline` for the bridge process; referenced as `availability_topic` by every entity except `last_seen` |
 
 ## Fields surveyed but **not** exposed
 
@@ -208,6 +232,7 @@ UART-TTL protocol variants and so cannot be added to this bridge:
 protocol but does not appear to have a stable Modbus register address across
 firmware variants. Pending a verified register location it is not exposed.
 
-`online_status` is implicit: the bridge does not publish state messages while
-the BMS is unreachable, and HA shows the entity as unavailable until a fresh
-update arrives.
+`online_status` is not a register: the bridge does not publish state messages
+while a BMS is unreachable, so its entities keep their last value. Per-BMS
+freshness is exposed as the `last_seen` timestamp instead (see
+[Availability](#availability)).

@@ -86,6 +86,9 @@ SLUG: dict[str, str] = {
     # writable controls that deviate from their register name
     "pack_capacity_setting": "configured_pack_capacity_drives_soc_scaling",
     "short_circuit_protection_delay_us": "short_circuit_protection_trip_delay",
+    # Added after legacy installs were registered: it is a NEW registry entry
+    # on every install, so it gets the bridge's suggested id even there.
+    "last_seen": "device_last_seen",
     # cell-stat sensors keep their short names (cell_voltage_average, _delta,
     # _max_value, _min_value, _max_number, _min_number) -> identity, no entry.
 }
@@ -256,6 +259,46 @@ def _alarm_chip(n: int) -> dict:
     }
 
 
+# Freshness fade: green while data is fresh, linearly to grey at STALE_AFTER_S.
+STALE_AFTER_S = 300
+_FRESH_RGB = (0x41, 0xCD, 0x52)  # same green as the SoC bar / cell table
+_STALE_RGB = (0x9E, 0x9E, 0x9E)
+
+
+def _last_seen_card(n: int) -> dict:
+    """Mushroom tile: 'Last seen · 12 seconds ago', icon fading green → grey.
+
+    The template references the ``last_seen`` entity, so it re-renders on every
+    poll while data flows; ``now()`` re-renders it once a minute after that, so
+    a silent pack keeps greying out. mushroom's ``icon_color`` accepts hex.
+    """
+    e = sensor(n, "last_seen")
+    missing = f"states('{e}') in ['', 'unknown', 'unavailable']"
+    frac = (
+        f"{{% set f = ((now() - as_datetime(states('{e}'))).total_seconds() "
+        f"/ {STALE_AFTER_S}) %}}{{% set f = [[f, 0] | max, 1] | min %}}"
+    )
+    channels = ", ".join(
+        f"({a} + ({b} - {a}) * f) | round | int" for a, b in zip(_FRESH_RGB, _STALE_RGB, strict=True)
+    )
+    grey = "#" + "".join(f"{c:02x}" for c in _STALE_RGB)
+    return {
+        "type": "custom:mushroom-template-card",
+        "primary": "Last seen",
+        "secondary": (
+            f"{{% if {missing} %}}Never"
+            f"{{% else %}}{{{{ relative_time(as_datetime(states('{e}'))) }}}} ago{{% endif %}}"
+        ),
+        "icon": "mdi:access-point-network",
+        "icon_color": (
+            f"{{% if {missing} %}}{grey}"
+            f"{{% else %}}{frac}{{{{ '#%02x%02x%02x' | format({channels}) }}}}{{% endif %}}"
+        ),
+        "entity": e,
+        "tap_action": {"action": "more-info"},
+    }
+
+
 def _gauge(entity: str, name: str, mn: float, mx: float, severity: dict | None = None) -> dict:
     g = {"type": "gauge", "entity": entity, "name": name, "min": mn, "max": mx, "needle": True}
     if severity:
@@ -298,7 +341,7 @@ def _summary_tile(primary: str, secondary: str, icon: str, color: str, entity: s
 
 
 def _summary_attr_tile(
-    primary: str, label: str, attr_entity: str, icon: str, color: str, entity: str
+    primary: str, label: str, attr_entity: str, *, icon: str, color: str, entity: str
 ) -> dict:
     """A tile whose secondary shows ``<label> (<reporting BMS>)`` from the ``bms`` attr.
 
@@ -343,18 +386,21 @@ def bank_summary_section() -> dict:
             ),
             _summary_attr_tile(
                 f"{{{{ states('{maxtemp}') }}}} °C", "Max temp", maxtemp,
-                "mdi:thermometer", "deep-orange", maxtemp,
+                icon="mdi:thermometer", color="deep-orange", entity=maxtemp,
             ),
             _summary_attr_tile(
                 f"{{{{ states('{minsoc}') }}}} %", "Min SoC", minsoc,
-                "mdi:battery-low", "green", minsoc,
+                icon="mdi:battery-low", color="green", entity=minsoc,
             ),
             _summary_attr_tile(
                 f"{{% if is_state('{alarm}', 'on') %}}Alarm{{% else %}}OK{{% endif %}}",
                 "Alarms", alarm,
-                f"{{% if is_state('{alarm}', 'on') %}}mdi:alert{{% else %}}mdi:shield-check{{% endif %}}",
-                f"{{% if is_state('{alarm}', 'on') %}}red{{% else %}}green{{% endif %}}",
-                alarm,
+                icon=(
+                    f"{{% if is_state('{alarm}', 'on') %}}mdi:alert"
+                    f"{{% else %}}mdi:shield-check{{% endif %}}"
+                ),
+                color=f"{{% if is_state('{alarm}', 'on') %}}red{{% else %}}green{{% endif %}}",
+                entity=alarm,
             ),
         ],
     }
@@ -410,14 +456,19 @@ def overview_section(n: int) -> dict:
             _alarm_chip(n),
         ],
     }
-    tile = {"type": "vertical-stack", "cards": [heading, soc_bar, gauges, stats]}
-    # Hide the tile when the pack isn't publishing. HA's visibility engine does
-    # NOT support a `template` condition (only state/numeric_state/screen/user/
-    # location/time/and/or/not) — an unsupported condition is treated as unmet
-    # and the section vanishes in view mode while still showing in edit mode.
-    # So express "present" as the supported state form: neither unavailable nor
-    # unknown. Multiple visibility conditions are AND-ed.
-    present = sensor(n, "total_voltage")
+    tile = {
+        "type": "vertical-stack",
+        "cards": [heading, _last_seen_card(n), soc_bar, gauges, stats],
+    }
+    # Hide the tile only for a pack that has never reported. HA's visibility
+    # engine does NOT support a `template` condition (only state/numeric_state/
+    # screen/user/location/time/and/or/not) — an unsupported condition is
+    # treated as unmet and the section vanishes in view mode while still
+    # showing in edit mode. So express "has reported" as the supported state
+    # form on the retained last_seen sensor, which ignores bridge availability:
+    # a pack that went silent stays on screen, greyed out, instead of vanishing.
+    # Multiple visibility conditions are AND-ed.
+    present = sensor(n, "last_seen")
     return {
         "type": "grid",
         "cards": [tile],
@@ -435,6 +486,14 @@ def overview_section(n: int) -> dict:
 def _live_section(n: int) -> dict:
     cards = [
         _heading("Live", icon="mdi:flash"),
+        _last_seen_card(n),
+        {
+            "type": "entities",
+            "entities": [
+                {"entity": sensor(n, "last_seen"), "name": "Last successful poll",
+                 "format": "datetime"},
+            ],
+        },
         {
             "type": "custom:entity-progress-card",
             "entity": sensor(n, "soc_percentage"),
@@ -771,7 +830,7 @@ CORE_SENSORS = (
     "mos_temp", "cell_voltage_average", "cell_voltage_delta",
     "cell_voltage_max_value", "cell_voltage_min_value", "cell_voltage_max_number",
     "cell_voltage_min_number", "present_cell_count", "alarms", "alarm_bits",
-    "bms_model", "hw_version", "sw_version", "serial_number",
+    "bms_model", "hw_version", "sw_version", "serial_number", "last_seen",
 )
 CORE_BINARY = ("switch_charge", "switch_discharge", "switch_balance")
 

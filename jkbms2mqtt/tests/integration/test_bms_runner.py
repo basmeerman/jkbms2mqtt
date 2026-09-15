@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -421,6 +422,69 @@ async def test_cell_count_change_republishes_discovery() -> None:
         1 for t, _, _, r in pub.log if r and t.endswith("/config")
     )
     assert discovery_count_after > discovery_count_before
+
+
+# -- last_seen -------------------------------------------------------------------------
+
+
+async def test_successful_poll_publishes_retained_last_seen() -> None:
+    client = FakeClient(
+        map={
+            (1, BASE_RT): FakeResponse(registers=_block_a_for_pack_at(voltage_v=53.0, soc=50)),
+        }
+    )
+    pub = PublishCapture()
+    runner = BmsRunner(
+        client=client,  # type: ignore[arg-type]
+        settings=_settings(),
+        slave_addr=1,
+        bms_name="BMS_1",
+        publish=pub,
+        clock=lambda: datetime(2026, 9, 15, 10, 21, 7, tzinfo=UTC),
+    )
+    await runner._poll_once()
+    assert ("BMS_1/Last_seen", "2026-09-15T10:21:07+00:00", 1, True) in pub.log
+    # Published after the live state it vouches for.
+    topics = [t for t, _, _, _ in pub.log]
+    assert topics.index("BMS_1/Last_seen") > topics.index("BMS_1/Total_Voltage_V")
+
+
+async def test_default_clock_is_timezone_aware_utc() -> None:
+    client = FakeClient(
+        map={
+            (1, BASE_RT): FakeResponse(registers=_block_a_for_pack_at(voltage_v=53.0, soc=50)),
+        }
+    )
+    pub = PublishCapture()
+    runner = BmsRunner(
+        client=client,  # type: ignore[arg-type]
+        settings=_settings(),
+        slave_addr=1,
+        bms_name="BMS_1",
+        publish=pub,
+    )
+    before = datetime.now(UTC).replace(microsecond=0)
+    await runner._poll_once()
+    payload = next(p for t, p, _, _ in pub.log if t == "BMS_1/Last_seen")
+    stamp = datetime.fromisoformat(payload)
+    assert stamp.utcoffset() is not None
+    assert before <= stamp <= datetime.now(UTC)
+
+
+@pytest.mark.parametrize(
+    "miss", [FakeResponse(error=True), ConnectionError("dropped"), TimeoutError("slow")]
+)
+async def test_failed_poll_does_not_publish_last_seen(miss: Any) -> None:
+    pub = PublishCapture()
+    runner = BmsRunner(
+        client=FakeClient(map={}, miss=miss),  # type: ignore[arg-type]
+        settings=_settings(),
+        slave_addr=1,
+        bms_name="BMS_1",
+        publish=pub,
+    )
+    await runner._poll_once()
+    assert not any(t == "BMS_1/Last_seen" for t, _, _, _ in pub.log)
 
 
 # -- poll_loop -------------------------------------------------------------------------
