@@ -12,6 +12,11 @@ two through the generator's ``SLUG`` map, and fails the build on any drift:
 So if someone adds, removes, or renames an entity in ``entities.py`` /
 ``jk_settings.py`` without updating the dashboard, the build goes red.
 
+Writable settings change domain with their write tier (``number`` / ``switch``
+when on, ``sensor`` / ``binary_sensor`` when off), so the check runs per tier
+combination: ``legacy`` against the committed sample (generated with both
+tiers off), ``device`` against in-memory builds for all four combinations.
+
 Reconciliation works at the ``(domain, object_id)`` level, NOT on the rendered
 entity-id string — the deployed bridge names entities by a non-uniform
 device-name + description rule that is not reproducible from source (verified
@@ -40,6 +45,8 @@ from jkbms2mqtt.entities import (
     WRITABLE_ENTITIES,
     expand_cell_entities,
 )
+from jkbms2mqtt.mqtt import writable_component
+from jkbms2mqtt.protocol.jk_settings import Encoding
 
 HERE = Path(__file__).parent
 # Cell count the committed sample is generated with (see the header of the YAML).
@@ -48,12 +55,18 @@ CELLS = 16
 # Empty today — every verified entity is surfaced. Add "(domain, object_id)"
 # tuples here (with a reason) to consciously exclude one.
 ALLOW_MISSING: set[tuple[str, str]] = set()
+# (basic_writes, safety_writes)
+TIER_COMBOS = ((False, False), (True, False), (False, True), (True, True))
 
 _REF = re.compile(r"\b(sensor|binary_sensor|number|switch)\.bms_1_([a-z0-9_]+)")
 _INV_SLUG = {v: k for k, v in generate.SLUG.items()}
+# Legacy read-only variants of settings are slugged from their description.
+_INV_READ_ONLY_SLUG = {
+    generate._ha_slugify(w.description.rstrip(".")): w.object_id for w in WRITABLE_ENTITIES
+}
 
 
-def bridge_entities() -> set[tuple[str, str]]:
+def bridge_entities(*, basic_writes: bool, safety_writes: bool) -> set[tuple[str, str]]:
     """The (domain, object_id) set the bridge publishes (verified only).
 
     Unverified entities (heating / heating_current / packed bits) are hidden by
@@ -73,11 +86,17 @@ def bridge_entities() -> set[tuple[str, str]]:
             out.add((e.component.value, e.object_id))
     for w in WRITABLE_ENTITIES:
         if w.verified:
-            out.add((w.component.value, w.object_id))
+            writable = generate.tier_enabled(
+                w.object_id, basic_writes=basic_writes, safety_writes=safety_writes
+            )
+            component = writable_component(
+                is_bool=w.register.encoding is Encoding.BOOL32, writable=writable
+            )
+            out.add((component.value, w.object_id))
     return out
 
 
-def _slug_to_object_id(slug: str, naming: str) -> str:
+def _slug_to_object_id(domain: str, slug: str, naming: str) -> str:
     """Reverse the generator's naming: real entity slug -> bridge object_id."""
     if naming == "device":
         return slug.removeprefix("device_")
@@ -85,14 +104,17 @@ def _slug_to_object_id(slug: str, naming: str) -> str:
         return f"cell_{m.group(1)}_volt"
     if m := re.match(r"^cell_(\d+)_internal_resistance$", slug):
         return f"cell_{m.group(1)}_ohm"
+    if domain in ("sensor", "binary_sensor") and slug in _INV_READ_ONLY_SLUG:
+        return _INV_READ_ONLY_SLUG[slug]
     return _INV_SLUG.get(slug, slug)
 
 
-def _dashboard_texts(naming: str) -> list[str]:
+def _dashboard_texts(naming: str, *, basic_writes: bool, safety_writes: bool) -> list[str]:
     """The dashboard + package YAML to scan for the given naming mode.
 
-    ``legacy`` reads the committed sample (the canonical artifact); ``device``
-    builds in-memory (the add-on's auto-install output isn't committed).
+    ``legacy`` reads the committed sample (the canonical artifact, both tiers
+    off); ``device`` builds in-memory (the add-on's auto-install output isn't
+    committed).
     """
     if naming == "legacy":
         return [
@@ -101,22 +123,57 @@ def _dashboard_texts(naming: str) -> list[str]:
         ]
     generate._set_naming("device")
     return [
-        generate.dump_yaml(generate.build_dashboard([1], {1: CELLS})),
+        generate.dump_yaml(
+            generate.build_dashboard(
+                [1], {1: CELLS}, basic_writes=basic_writes, safety_writes=safety_writes
+            )
+        ),
         generate.dump_yaml(generate.aggregates_package([1])),
     ]
 
 
-def dashboard_entities(naming: str) -> set[tuple[str, str]]:
+def dashboard_entities(
+    naming: str, *, basic_writes: bool, safety_writes: bool
+) -> set[tuple[str, str]]:
     """Every (domain, object_id) the dashboard + package reference.
 
     Scans BMS_1 references; the bank aggregates (``*.jkbms_*``) don't match the
     ``bms_1_`` prefix and are correctly ignored.
     """
     out: set[tuple[str, str]] = set()
-    for text in _dashboard_texts(naming):
+    texts = _dashboard_texts(naming, basic_writes=basic_writes, safety_writes=safety_writes)
+    for text in texts:
         for domain, slug in _REF.findall(text):
-            out.add((domain, _slug_to_object_id(slug, naming)))
+            out.add((domain, _slug_to_object_id(domain, slug, naming)))
     return out
+
+
+def _check(naming: str, *, basic_writes: bool, safety_writes: bool) -> bool:
+    tiers = {"basic_writes": basic_writes, "safety_writes": safety_writes}
+    label = f"{naming}, basic_writes={basic_writes}, safety_writes={safety_writes}"
+    bridge = bridge_entities(**tiers)
+    dash = dashboard_entities(naming, **tiers)
+
+    missing = sorted(bridge - dash - ALLOW_MISSING)  # bridge has, dashboard lacks
+    unknown = sorted(dash - bridge)  # dashboard refs, bridge doesn't publish
+
+    if not missing and not unknown:
+        print(
+            f"OK ({label}): dashboard references all {len(bridge)} "
+            "verified bridge entities, no extras."
+        )
+        return True
+
+    print(f"DRIFT ({label}):")
+    if missing:
+        print("  bridge publishes these, but the dashboard does not reference them:")
+        for domain, oid in missing:
+            print(f"    + {domain}.<bms>_{oid}")
+    if unknown:
+        print("  dashboard references these, but the bridge does not publish them:")
+        for domain, oid in unknown:
+            print(f"    - {domain}.<bms>_{oid}")
+    return False
 
 
 def main() -> int:
@@ -124,27 +181,12 @@ def main() -> int:
     ap.add_argument("--naming", choices=["legacy", "device"], default="legacy")
     args = ap.parse_args()
 
-    bridge = bridge_entities()
-    dash = dashboard_entities(args.naming)
-
-    missing = sorted(bridge - dash - ALLOW_MISSING)  # bridge has, dashboard lacks
-    unknown = sorted(dash - bridge)  # dashboard refs, bridge doesn't publish
-
-    if not missing and not unknown:
-        print(
-            f"OK ({args.naming}): dashboard references all {len(bridge)} "
-            "verified bridge entities, no extras."
-        )
+    combos = ((False, False),) if args.naming == "legacy" else TIER_COMBOS
+    results = [
+        _check(args.naming, basic_writes=basic, safety_writes=safety) for basic, safety in combos
+    ]
+    if all(results):
         return 0
-
-    if missing:
-        print("DRIFT — bridge publishes these, but the dashboard does not reference them:")
-        for domain, oid in missing:
-            print(f"  + {domain}.<bms>_{oid}")
-    if unknown:
-        print("DRIFT — dashboard references these, but the bridge does not publish them:")
-        for domain, oid in unknown:
-            print(f"  - {domain}.<bms>_{oid}")
     print(
         "\nFix: update dashboards/generate.py (SLUG map / card builders) to match "
         "the bridge's entity table, regenerate, and commit. If an omission is "

@@ -150,11 +150,16 @@ def _install_dashboard(  # pragma: no cover - add-on glue
 
     Best-effort: a write failure (e.g. the homeassistant_config map is absent in
     a standalone container) is logged, never fatal. Uses ``device`` naming —
-    what a fresh install publishes — and one cell count for the whole bank.
+    what a fresh install publishes — one cell count for the whole bank, and the
+    current write tiers so settings render as controls or read-only sensors.
     """
     cells = {n: settings.dashboard_cells for n in settings.bms_ids}
     try:
-        dash_path, pkg_path = dashboard.install(config_dir, settings.bms_ids, cells)
+        dash_path, pkg_path = dashboard.install(
+            config_dir, settings.bms_ids, cells,
+            basic_writes=settings.enable_basic_writes,
+            safety_writes=settings.enable_safety_writes,
+        )
     except OSError as exc:
         logger.warning("install_dashboard: could not write dashboard files: %s", exc)
         return

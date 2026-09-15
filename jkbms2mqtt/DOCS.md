@@ -117,7 +117,9 @@ lovelace:
 ```
 
 A **JK-BMS** dashboard then appears in the sidebar and *self-updates* — change
-`bms_ids` and restart the add-on, and it regenerates with no re-paste.
+`bms_ids` or a write tier and restart the add-on, and it regenerates with no
+re-paste. Its **Controls** section always shows every setting's current value:
+as editable controls for a tier that is on, as read-only rows otherwise.
 
 > **Existing installs (entity ids like `sensor.bms_1_total_pack_voltage`):** the
 > auto-installed dashboard targets the ids a *fresh* install publishes
@@ -147,6 +149,12 @@ Any write to a parameter whose tier is *off* is rejected by the bridge with a
 structured JSON error on `<bms_name>/error`. This is the default safe state:
 HA users can see what every setting is, but cannot accidentally change a
 safety-critical threshold.
+
+Changing a tier needs an add-on restart. On that restart the setting moves
+between `sensor` and `number` (or `binary_sensor` and `switch`): the bridge
+removes the old entity from Home Assistant and the auto-installed dashboard
+switches its rows to match. A manually generated dashboard must be regenerated
+with the matching `--basic-writes` / `--safety-writes` flags.
 
 Example rejected write (basic tier off):
 

@@ -78,9 +78,11 @@ history-graph).
 
 **Tier gating:** writable params are published as `number`/`switch` only when
 `enable_basic_writes` / `enable_safety_writes` are on; otherwise as read-only
-`sensor`/`binary_sensor` of the same slug. The Controls section references the
-`number`/`switch` domain and degrades to Unavailable when the tier is off
-(documented in the README).
+`sensor`/`binary_sensor`. The generator takes the tiers (`--basic-writes` /
+`--safety-writes`; the add-on passes its options) and renders each Controls row
+in the matching domain, so settings stay visible read-only when a tier is off.
+On legacy installs the read-only variant is slugged from the description, not
+the register name (verified against a real install's HA log).
 
 **Unverified/hidden by default:** `heating`, `heating_current`, and the packed
 bits `disable_pcl_module_switch`/`smart_sleep_switch`/`timed_stored_data_switch`
@@ -123,8 +125,8 @@ python dashboards/generate.py --bms-ids 1,2,3,4,5,6 --cells 16
     table, sized to the pack's cell count.
   - **Diagnostics** — SoH, cycle count, cycle capacity, runtime,
     present_cell_count, alarm_bits, nameplate.
-  - **Controls** — basic + safety `number`/`switch` cards, with a warning note;
-    degrade gracefully when write tiers are off.
+  - **Controls** — basic + safety settings with a warning note; `number`/`switch`
+    rows for a tier that is on, read-only `sensor`/`binary_sensor` rows otherwise.
   - **History** — core `history-graph` for SoC, voltage, power, temps.
 
 ### Aggregates package (`packages/jkbms_aggregates.yaml`, generated)

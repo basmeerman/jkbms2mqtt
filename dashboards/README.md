@@ -34,8 +34,9 @@ and **Diagnostics** + **Nameplate**:
 
 ![Pack detail — Live, Cells, Diagnostics](docs/bms_1a.png)
 
-Scrolling down: **Controls** (editable `number`/`switch` settings, shown only
-when the add-on's write tiers are enabled) and **History** graphs:
+Scrolling down: **Controls** (every BMS setting with its current value —
+editable `number`/`switch` rows when the add-on's write tier is on, read-only
+rows otherwise) and **History** graphs:
 
 ![Pack detail — Controls (basic) and History](docs/bms_1b.png)
 ![Pack detail — Safety thresholds and Temperatures history](docs/bms_1c.png)
@@ -74,7 +75,14 @@ python dashboards/generate.py --bms-ids 1,2,3,4,5,6 --cells 16
 
 # non-contiguous ids, different cell counts per pack
 python dashboards/generate.py --bms-ids 1,3,7 --cells 1=16,3=8,7=24
+
+# write tiers on in the add-on: pass the same tiers
+python dashboards/generate.py --bms-ids 1,2,3,4,5,6 --cells 16 --basic-writes --safety-writes
 ```
+
+The tier flags must match `enable_basic_writes` / `enable_safety_writes` in the
+add-on options (both off by default), because a setting is a `number`/`switch`
+only while its tier is on and a `sensor`/`binary_sensor` otherwise.
 
 Requires Python 3 + PyYAML (`pip install pyyaml`) — a generator-time tool only,
 nothing extra runs in the add-on. Outputs:
@@ -135,11 +143,17 @@ Copy `jkbms_aggregates.yaml` into `<config>/packages/` and restart HA.
 
 ## Notes & caveats
 
-- **Controls (writes) are tier-gated.** The Controls section references
-  `number.*` / `switch.*` entities that the bridge only publishes when
-  `enable_basic_writes` / `enable_safety_writes` are on. With a tier off, those
-  rows show *Unavailable* — the current value is still readable as a sensor on
-  the device page. ⚠️ Safety thresholds can damage cells if set wrong.
+- **Controls (writes) are tier-gated.** With a tier off, its rows reference the
+  read-only `sensor.*` / `binary_sensor.*` entities; with it on, the editable
+  `number.*` / `switch.*` ones. The auto-installed dashboard follows the add-on
+  options on every restart; after changing a tier, **re-generate a manual
+  dashboard** with the matching `--basic-writes` / `--safety-writes` flags and
+  re-paste. ⚠️ Safety thresholds can damage cells if set wrong.
+- **Legacy read-only setting ids.** On legacy installs the read-only variants
+  are slugged from the setting's description
+  (`sensor.bms_1_cell_voltage_below_which_the_bms_enters_smart_sleep`), while
+  the controls keep the register name (`number.bms_1_smart_sleep_voltage`).
+  The generator handles both; run `out/verify-entities.jinja` to confirm.
 - **Re-generate after changing `bms_ids` or cell counts** and re-paste.
 - **Five temperature probes** are shown (`probe_1..5`); unused probes show
   Unavailable. Unverified fields (`heating`, packed-bit toggles) are excluded.
