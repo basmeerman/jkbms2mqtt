@@ -23,11 +23,13 @@ import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from jkbms2mqtt.mqtt import (
     build_discovery_messages,
     render,
+    state_message_last_seen,
     state_messages_from_live,
     state_messages_from_settings,
     state_messages_from_static,
@@ -79,6 +81,7 @@ class BmsRunner:
     slave_addr: int
     bms_name: str
     publish: PublishFn
+    clock: Callable[[], datetime] = field(default=lambda: datetime.now(UTC))
 
     _cell_count: int = field(default=16, init=False)
     _discovery_announced: bool = field(default=False, init=False)
@@ -124,6 +127,10 @@ class BmsRunner:
             debug_unverified=self.settings.debug_unverified_fields,
         ):
             await self.publish(topic, payload, 0, False)
+        # Retained so HA shows the true age of the data even after a bridge or
+        # HA restart; only reached when block A succeeded.
+        topic, payload = state_message_last_seen(self.bms_name, self.clock())
+        await self.publish(topic, payload, 1, True)
         await self._poll_static_info_if_needed()
         await self._poll_settings()
 

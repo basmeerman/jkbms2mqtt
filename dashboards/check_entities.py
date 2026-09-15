@@ -32,6 +32,7 @@ from pathlib import Path
 
 from jkbms2mqtt import dashboard as generate  # SLUG map + cell rules (the real generator)
 from jkbms2mqtt.entities import (
+    BRIDGE_SENSORS,
     CELL_STATS_SENSORS,
     FIXED_SENSORS,
     LIVE_BINARY_SENSORS,
@@ -64,6 +65,7 @@ def bridge_entities() -> set[tuple[str, str]]:
         *LIVE_BINARY_SENSORS,
         *CELL_STATS_SENSORS,
         *FIXED_SENSORS,
+        *BRIDGE_SENSORS,
         *expand_cell_entities(CELLS),
     )
     for e in read_only:

@@ -7,6 +7,7 @@ from dataclasses import fields
 import pytest
 
 from jkbms2mqtt.entities import (
+    BRIDGE_SENSORS,
     CELL_STATS_SENSORS,
     FIXED_SENSORS,
     LIVE_BINARY_SENSORS,
@@ -45,7 +46,10 @@ class TestSourceFieldsExistOnDataclasses:
 class TestUniqueness:
     def test_no_duplicate_object_ids(self) -> None:
         ids: list[str] = []
-        for e in LIVE_SENSORS + LIVE_BINARY_SENSORS + CELL_STATS_SENSORS + FIXED_SENSORS:
+        for e in (
+            LIVE_SENSORS + LIVE_BINARY_SENSORS + CELL_STATS_SENSORS + FIXED_SENSORS
+            + BRIDGE_SENSORS
+        ):
             ids.append(e.object_id)
         for w in WRITABLE_ENTITIES:
             ids.append(w.object_id)
@@ -55,7 +59,10 @@ class TestUniqueness:
 
     def test_no_duplicate_topic_suffixes(self) -> None:
         suffixes: list[str] = []
-        for e in LIVE_SENSORS + LIVE_BINARY_SENSORS + CELL_STATS_SENSORS + FIXED_SENSORS:
+        for e in (
+            LIVE_SENSORS + LIVE_BINARY_SENSORS + CELL_STATS_SENSORS + FIXED_SENSORS
+            + BRIDGE_SENSORS
+        ):
             suffixes.append(e.topic_suffix)
         for w in WRITABLE_ENTITIES:
             suffixes.append(w.topic_suffix)

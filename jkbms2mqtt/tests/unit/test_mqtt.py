@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 
 import pytest
 
@@ -13,12 +14,14 @@ from jkbms2mqtt.entities import (
     WRITABLE_ENTITIES,
 )
 from jkbms2mqtt.mqtt import (
+    BRIDGE_AVAILABILITY_TOPIC,
     _format,
     build_discovery_messages,
     discovery_for_packed_bit,
     discovery_for_read_only,
     discovery_for_writable,
     render,
+    state_message_last_seen,
     state_messages_from_live,
     state_messages_from_settings,
     state_messages_from_static,
@@ -357,6 +360,53 @@ class TestDiscoveryPayloads:
 
 
 # -- State messages -------------------------------------------------------------------
+
+
+class TestFreshness:
+    def test_every_entity_follows_bridge_availability_except_last_seen(self) -> None:
+        s = _settings(
+            enable_basic_writes=True, enable_safety_writes=True,
+            debug_unverified_fields=True,
+        )
+        msgs = build_discovery_messages(settings=s, bms_name="BMS_1", cell_count=16)
+        for m in msgs:
+            if m.payload["unique_id"] == "BMS_1_device_last_seen":
+                assert "availability_topic" not in m.payload
+            else:
+                assert m.payload["availability_topic"] == BRIDGE_AVAILABILITY_TOPIC, m.topic
+
+    def test_last_seen_discovery_is_timestamp_sensor(self) -> None:
+        msgs = build_discovery_messages(settings=_settings(), bms_name="BMS_1", cell_count=16)
+        m = next(x for x in msgs if x.payload["unique_id"] == "BMS_1_device_last_seen")
+        assert m.topic == "homeassistant/sensor/BMS_1_device_last_seen/config"
+        assert m.payload["device_class"] == "timestamp"
+        assert m.payload["state_topic"] == "BMS_1/Last_seen"
+        assert m.payload["name"] == "Last seen"
+        assert "entity_category" not in m.payload
+        assert "suggested_display_precision" not in m.payload
+
+    def test_default_entity_id_is_domain_qualified_and_lowercase(self) -> None:
+        e = next(x for x in LIVE_SENSORS if x.object_id == "total_voltage")
+        msg = discovery_for_read_only(e, "BMS_1", discovery_prefix="homeassistant")
+        assert msg.payload["default_entity_id"] == "sensor.bms_1_device_total_voltage"
+        assert msg.payload["object_id"] == "BMS_1_device_total_voltage"
+
+    def test_default_entity_id_follows_tier_downgrade(self) -> None:
+        w = next(x for x in WRITABLE_ENTITIES if x.object_id == "max_charge_current")
+        on = discovery_for_writable(w, "BMS_1", discovery_prefix="homeassistant", writable=True)
+        off = discovery_for_writable(w, "BMS_1", discovery_prefix="homeassistant", writable=False)
+        assert on.payload["default_entity_id"] == "number.bms_1_device_max_charge_current"
+        assert off.payload["default_entity_id"] == "sensor.bms_1_device_max_charge_current"
+
+    def test_state_message_last_seen_iso_with_timezone(self) -> None:
+        when = datetime(2026, 9, 15, 10, 21, 7, 123456, tzinfo=UTC)
+        assert state_message_last_seen("BMS_1", when) == (
+            "BMS_1/Last_seen", "2026-09-15T10:21:07+00:00",
+        )
+
+    def test_state_message_last_seen_rejects_naive_datetime(self) -> None:
+        with pytest.raises(ValueError, match="timezone-aware"):
+            state_message_last_seen("BMS_1", datetime(2026, 9, 15, 10, 21, 7))
 
 
 class TestStateMessagesFromLive:

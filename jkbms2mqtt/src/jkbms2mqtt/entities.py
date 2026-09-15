@@ -77,6 +77,11 @@ class ReadOnlyEntity:
     # Diagnostics). "config" is reserved for writable settings — read-only
     # entities should not use it. See https://developers.home-assistant.io/docs/core/entity/
     entity_category: str | None = None
+    # When True the discovery payload carries the bridge LWT as
+    # ``availability_topic``, so HA marks the entity unavailable while the
+    # bridge process is down. ``last_seen`` opts out: it must keep showing the
+    # last successful poll time precisely when everything else is stale.
+    follows_bridge_availability: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -578,6 +583,24 @@ FIXED_SENSORS: Final[tuple[ReadOnlyEntity, ...]] = (
 )
 
 
+# -- Bridge-generated sensors (not decoded from the BMS) ------------------------------
+
+BRIDGE_SENSORS: Final[tuple[ReadOnlyEntity, ...]] = (
+    ReadOnlyEntity(
+        object_id="last_seen",
+        topic_suffix="Last_seen",
+        source_field="",  # bridge wall clock at the last successful realtime poll
+        component=Component.SENSOR,
+        device_class="timestamp",
+        state_class=None,
+        unit_of_measurement=None,
+        decimals=None,
+        description="Last seen.",
+        follows_bridge_availability=False,
+    ),
+)
+
+
 # -- Writable entities -----------------------------------------------------------------
 
 
@@ -621,6 +644,7 @@ def all_read_only_entities(cell_count: int) -> tuple[ReadOnlyEntity, ...]:
         + CELL_STATS_SENSORS
         + expand_cell_entities(cell_count)
         + FIXED_SENSORS
+        + BRIDGE_SENSORS
     )
 
 
