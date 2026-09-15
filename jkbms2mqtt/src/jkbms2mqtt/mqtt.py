@@ -111,7 +111,7 @@ def discovery_removal(
     )
 
 
-def _writable_component(*, is_bool: bool, writable: bool) -> Component:
+def writable_component(*, is_bool: bool, writable: bool) -> Component:
     if writable:
         return Component.SWITCH if is_bool else Component.NUMBER
     return Component.BINARY_SENSOR if is_bool else Component.SENSOR
@@ -208,7 +208,7 @@ def discovery_for_writable(
     ``diagnostic``). Either way the same state topic carries the current BMS
     value.
     """
-    component = _writable_component(
+    component = writable_component(
         is_bool=entity.register.encoding is Encoding.BOOL32, writable=writable
     )
     payload = _base_payload(
@@ -250,7 +250,7 @@ def discovery_for_packed_bit(
     entity: PackedBitEntity, bms_name: str, *, discovery_prefix: str, writable: bool
 ) -> DiscoveryMessage:
     """Discovery for a packed-bit boolean — switch when writable, binary sensor otherwise."""
-    component = _writable_component(is_bool=True, writable=writable)
+    component = writable_component(is_bool=True, writable=writable)
     payload = _base_payload(
         bms_name,
         component=component,
@@ -335,7 +335,7 @@ def build_discovery_messages(
         is_bool = w.register.encoding is Encoding.BOOL32
         if not w.verified and not debug:  # pragma: no branch - no unverified writables today
             for flag in (True, False):  # pragma: no cover
-                remove(_writable_component(is_bool=is_bool, writable=flag), w.object_id)
+                remove(writable_component(is_bool=is_bool, writable=flag), w.object_id)
             continue  # pragma: no cover
         writable = _tier_enabled(settings, w.register.tier)
         messages.append(
@@ -343,12 +343,12 @@ def build_discovery_messages(
                 w, bms_name, discovery_prefix=discovery_prefix, writable=writable
             )
         )
-        remove(_writable_component(is_bool=is_bool, writable=not writable), w.object_id)
+        remove(writable_component(is_bool=is_bool, writable=not writable), w.object_id)
 
     for p in PACKED_BIT_ENTITIES:
         if not p.verified and not debug:
             for flag in (True, False):
-                remove(_writable_component(is_bool=True, writable=flag), p.object_id)
+                remove(writable_component(is_bool=True, writable=flag), p.object_id)
             continue
         writable = _tier_enabled(settings, p.bit.tier)
         messages.append(
@@ -356,7 +356,7 @@ def build_discovery_messages(
                 p, bms_name, discovery_prefix=discovery_prefix, writable=writable
             )
         )
-        remove(_writable_component(is_bool=True, writable=not writable), p.object_id)
+        remove(writable_component(is_bool=True, writable=not writable), p.object_id)
 
     return messages
 

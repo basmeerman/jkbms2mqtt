@@ -26,9 +26,14 @@ from __future__ import annotations
 
 import argparse
 import re
+import unicodedata
 from pathlib import Path
 
 import yaml
+
+from jkbms2mqtt.entities import WRITABLE_ENTITIES
+from jkbms2mqtt.mqtt import writable_component
+from jkbms2mqtt.protocol.jk_settings import Encoding, WriteTier
 
 # Naming mode for the current build: "legacy" (name-slug, sticky old installs)
 # or "device" (object_id-based, fresh installs). Set by the top-level builders.
@@ -125,8 +130,51 @@ def binsensor(n: int, key: str) -> str:
     return ent("binary_sensor", n, key)
 
 
-# Writable params: published as number/switch when the matching write tier is
-# enabled, else as read-only sensor/binary_sensor of the same object_id.
+_WRITABLES = {w.object_id: w for w in WRITABLE_ENTITIES}
+
+
+def _ha_slugify(text: str) -> str:
+    """HA's entity-id slug of a discovery ``name``.
+
+    Lowercase; every run of characters outside ``a-z0-9`` becomes ``_``.
+    Non-ASCII is dropped where HA's python-slugify transliterates it; for every
+    current setting description the result is identical (checked against
+    python-slugify 9.0.0 — the only non-ASCII character, ``→``, is a separator
+    either way).
+    """
+    ascii_text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode()
+    return re.sub(r"[^a-z0-9]+", "_", ascii_text.lower()).strip("_")
+
+
+def tier_enabled(object_id: str, *, basic_writes: bool, safety_writes: bool) -> bool:
+    """Whether the write tier of this setting is on (register table is the truth)."""
+    tier = _WRITABLES[object_id].register.tier
+    return basic_writes if tier is WriteTier.BASIC else safety_writes
+
+
+def setting(n: int, object_id: str, *, writable: bool) -> str:
+    """Entity id of a writable setting, whose domain follows its write tier.
+
+    Tier on: ``number`` / ``switch``. Tier off: the bridge publishes the same
+    object_id read-only as ``sensor`` / ``binary_sensor``.
+
+    Legacy installs registered the two variants at different times, so their
+    slugs differ: the controls carry the register-name slug (``SLUG``), the
+    read-only variants HA's slug of the discovery name (the description) —
+    verified against a real install's HA log, e.g.
+    ``sensor.bms_1_cell_voltage_below_which_the_bms_enters_smart_sleep``.
+    """
+    w = _WRITABLES[object_id]
+    domain = writable_component(
+        is_bool=w.register.encoding is Encoding.BOOL32, writable=writable
+    ).value
+    if _NAMING == "legacy" and not writable:
+        return f"{domain}.bms_{n}_{_ha_slugify(w.description.rstrip('.'))}"
+    return ent(domain, n, object_id)
+
+
+# Writable params, in dashboard order. Each renders through ``setting()``, so
+# the row is a control when its tier is on and a read-only sensor otherwise.
 BASIC_NUMBERS = (
     ("smart_sleep_voltage", "Smart-sleep voltage"),
     ("balance_trigger_voltage", "Balance trigger voltage"),
@@ -638,22 +686,39 @@ def _diagnostics_section(n: int) -> dict:
     return {"type": "grid", "cards": cards}
 
 
-def _controls_section(n: int) -> dict:
-    basic = [{"entity": ent("switch", n, oid), "name": name} for oid, name in BASIC_SWITCHES]
-    basic += [{"entity": ent("number", n, oid), "name": name} for oid, name in BASIC_NUMBERS]
-    safety = [{"entity": ent("number", n, oid), "name": name} for oid, name in SAFETY_NUMBERS]
+def _controls_section(n: int, *, basic_writes: bool, safety_writes: bool) -> dict:
+    def rows(items: tuple[tuple[str, str], ...]) -> list[dict]:
+        return [
+            {
+                "entity": setting(
+                    n, oid,
+                    writable=tier_enabled(
+                        oid, basic_writes=basic_writes, safety_writes=safety_writes
+                    ),
+                ),
+                "name": name,
+            }
+            for oid, name in items
+        ]
+
+    def mode(enabled: bool, option: str) -> str:
+        return "editable" if enabled else f"read-only (set `{option}: true` to edit)"
+
     note = _Block(
-        "**Controls appear only when write tiers are enabled.** Set\n"
-        "`enable_basic_writes` / `enable_safety_writes` in the add-on config.\n"
-        "When a tier is off these rows show *Unavailable* (the value is still\n"
-        "visible as a read-only sensor on the device page).\n\n"
+        "**Settings always show the BMS's current value.** The write tiers decide\n"
+        "whether they can be changed from Home Assistant:\n\n"
+        f"- Basic settings: {mode(basic_writes, 'enable_basic_writes')}\n"
+        f"- Safety thresholds: {mode(safety_writes, 'enable_safety_writes')}\n\n"
+        "The add-on rebuilds this dashboard when it restarts; a manually installed\n"
+        "copy must be regenerated after changing a tier.\n\n"
         "⚠️ Safety thresholds can damage cells or cause a fire if set wrong.\n"
     )
     cards = [
         _heading("Controls", icon="mdi:tune"),
         {"type": "markdown", "content": note},
-        {"type": "entities", "title": "Basic settings", "entities": basic},
-        {"type": "entities", "title": "Safety thresholds", "entities": safety},
+        {"type": "entities", "title": "Basic settings",
+         "entities": rows(BASIC_SWITCHES + BASIC_NUMBERS)},
+        {"type": "entities", "title": "Safety thresholds", "entities": rows(SAFETY_NUMBERS)},
     ]
     return {"type": "grid", "cards": cards}
 
@@ -674,7 +739,7 @@ def _history_section(n: int) -> dict:
     return {"type": "grid", "cards": cards}
 
 
-def detail_view(n: int, cells: int) -> dict:
+def detail_view(n: int, cells: int, *, basic_writes: bool, safety_writes: bool) -> dict:
     return {
         "title": f"BMS {n}",
         "path": f"bms-{n}",
@@ -685,7 +750,7 @@ def detail_view(n: int, cells: int) -> dict:
             _live_section(n),
             _cells_section(n, cells),
             _diagnostics_section(n),
-            _controls_section(n),
+            _controls_section(n, basic_writes=basic_writes, safety_writes=safety_writes),
             _history_section(n),
         ],
     }
@@ -835,7 +900,9 @@ CORE_SENSORS = (
 CORE_BINARY = ("switch_charge", "switch_discharge", "switch_balance")
 
 
-def _expected_entities(ids: list[int], cells: dict[int, int]) -> dict[str, list[str]]:
+def _expected_entities(
+    ids: list[int], cells: dict[int, int], *, basic_writes: bool, safety_writes: bool
+) -> dict[str, list[str]]:
     groups: dict[str, list[str]] = {}
     for n in ids:
         core = [sensor(n, o) for o in CORE_SENSORS]
@@ -843,9 +910,13 @@ def _expected_entities(ids: list[int], cells: dict[int, int]) -> dict[str, list[
         core += [sensor(n, f"cell_{k}_volt") for k in range(1, cells[n] + 1)]
         core += [sensor(n, f"cell_{k}_ohm") for k in range(1, cells[n] + 1)]
         groups[f"BMS {n} read-only"] = core
-        ctrl = [ent("switch", n, o) for o, _ in BASIC_SWITCHES]
-        ctrl += [ent("number", n, o) for o, _ in BASIC_NUMBERS + SAFETY_NUMBERS]
-        groups[f"BMS {n} controls (need write tier)"] = ctrl
+        groups[f"BMS {n} settings"] = [
+            setting(
+                n, o,
+                writable=tier_enabled(o, basic_writes=basic_writes, safety_writes=safety_writes),
+            )
+            for o, _ in BASIC_SWITCHES + BASIC_NUMBERS + SAFETY_NUMBERS
+        ]
     groups["Bank aggregates (need package)"] = [
         "binary_sensor.jkbms_any_alarm",
         "sensor.jkbms_bank_total_power",
@@ -855,9 +926,13 @@ def _expected_entities(ids: list[int], cells: dict[int, int]) -> dict[str, list[
     return groups
 
 
-def verify_template(ids: list[int], cells: dict[int, int]) -> str:
+def verify_template(
+    ids: list[int], cells: dict[int, int], *, basic_writes: bool = False, safety_writes: bool = False
+) -> str:
     """A self-contained Jinja report for Developer Tools → Template."""
-    groups = _expected_entities(ids, cells)
+    groups = _expected_entities(
+        ids, cells, basic_writes=basic_writes, safety_writes=safety_writes
+    )
     lines = ["{%- set groups = {"]
     for name, ents in groups.items():
         joined = ", ".join(f"'{e}'" for e in ents)
@@ -905,7 +980,10 @@ def parse_cells(raw: str, ids: list[int]) -> dict[int, int]:
     return out
 
 
-def build_dashboard(ids: list[int], cells: dict[int, int]) -> dict:
+def build_dashboard(
+    ids: list[int], cells: dict[int, int], *, basic_writes: bool = False, safety_writes: bool = False
+) -> dict:
+    """Build the dashboard; the write tiers must match the add-on's options."""
     overview = {
         "title": "Overview",
         "path": "overview",
@@ -913,7 +991,10 @@ def build_dashboard(ids: list[int], cells: dict[int, int]) -> dict:
         "max_columns": 3,
         "sections": [bank_summary_section()] + [overview_section(n) for n in ids],
     }
-    views = [overview] + [detail_view(n, cells[n]) for n in ids]
+    views = [overview] + [
+        detail_view(n, cells[n], basic_writes=basic_writes, safety_writes=safety_writes)
+        for n in ids
+    ]
     return {"title": "JK-BMS", "views": views}
 
 
@@ -926,11 +1007,17 @@ def _set_naming(naming: str) -> None:
     _NAMING = naming
 
 
-def _header(ids: list[int], cells: dict[int, int], naming: str) -> str:
+def _header(
+    ids: list[int], cells: dict[int, int], naming: str, *, basic_writes: bool, safety_writes: bool
+) -> str:
+    def onoff(enabled: bool) -> str:
+        return "on" if enabled else "off"
+
     return (
         "# Generated by jkbms2mqtt (dashboard.py) — do not edit by hand.\n"
         f"# naming: {naming}  bms-ids: {','.join(map(str, ids))}  "
         f"cells: {','.join(f'{n}={cells[n]}' for n in ids)}\n"
+        f"# writes: basic={onoff(basic_writes)}  safety={onoff(safety_writes)}\n"
     )
 
 
@@ -942,24 +1029,37 @@ def write_files(
     dashboard_path: Path,
     package_path: Path,
     verify_path: Path | None = None,
+    basic_writes: bool = False,
+    safety_writes: bool = False,
 ) -> None:
     """Render the dashboard + package (+ optional probe) and write them to disk."""
     _set_naming(naming)
-    header = _header(ids, cells, naming)
+    tiers = {"basic_writes": basic_writes, "safety_writes": safety_writes}
+    header = _header(ids, cells, naming, **tiers)
     dashboard_path.parent.mkdir(parents=True, exist_ok=True)
-    dashboard_path.write_text(header + dump_yaml(build_dashboard(ids, cells)))
+    dashboard_path.write_text(header + dump_yaml(build_dashboard(ids, cells, **tiers)))
     package_path.parent.mkdir(parents=True, exist_ok=True)
     package_path.write_text(header + dump_yaml(aggregates_package(ids)))
     if verify_path is not None:
         verify_path.parent.mkdir(parents=True, exist_ok=True)
-        verify_path.write_text(verify_template(ids, cells))
+        verify_path.write_text(verify_template(ids, cells, **tiers))
 
 
-def install(config_dir: Path, ids: list[int], cells: dict[int, int]) -> tuple[Path, Path]:
+def install(
+    config_dir: Path,
+    ids: list[int],
+    cells: dict[int, int],
+    *,
+    basic_writes: bool,
+    safety_writes: bool,
+) -> tuple[Path, Path]:
     """Write the auto-install dashboard + package into the HA config dir.
 
     Uses ``device`` naming — what a fresh add-on install publishes (object_id
-    discovery). Files land under ``<config>/jkbms2mqtt/`` so the one-time
+    discovery). The write tiers come from the add-on options: tier changes only
+    take effect on an add-on restart, which also rewrites this dashboard, so
+    its controls / read-only rows always match what the bridge publishes.
+    Files land under ``<config>/jkbms2mqtt/`` so the one-time
     ``configuration.yaml`` block can include them. Returns the two paths.
     """
     base = Path(config_dir) / "jkbms2mqtt"
@@ -968,6 +1068,7 @@ def install(config_dir: Path, ids: list[int], cells: dict[int, int]) -> tuple[Pa
     write_files(
         ids=ids, cells=cells, naming="device",
         dashboard_path=dashboard_path, package_path=package_path,
+        basic_writes=basic_writes, safety_writes=safety_writes,
     )
     return dashboard_path, package_path
 
@@ -981,6 +1082,10 @@ def main(default_dir: Path | None = None) -> int:
                     help="cells per pack: '16' or per-id '1=16,3=8,7=24'")
     ap.add_argument("--naming", choices=["legacy", "device"], default="legacy",
                     help="legacy = sticky old name-slug ids; device = fresh-install object_id ids")
+    ap.add_argument("--basic-writes", action="store_true",
+                    help="enable_basic_writes is on: basic settings become controls")
+    ap.add_argument("--safety-writes", action="store_true",
+                    help="enable_safety_writes is on: safety thresholds become controls")
     ap.add_argument("--out", default=str(here / "out" / "jkbms2mqtt-dashboard.yaml"))
     ap.add_argument("--package-out", default=str(here / "packages" / "jkbms_aggregates.yaml"))
     ap.add_argument("--verify-out", default=str(here / "out" / "verify-entities.jinja"))
@@ -992,8 +1097,12 @@ def main(default_dir: Path | None = None) -> int:
         ids=ids, cells=cells, naming=args.naming,
         dashboard_path=Path(args.out), package_path=Path(args.package_out),
         verify_path=Path(args.verify_out),
+        basic_writes=args.basic_writes, safety_writes=args.safety_writes,
     )
-    print(f"wrote {args.out} ({len(ids)} packs, naming={args.naming})")
+    print(
+        f"wrote {args.out} ({len(ids)} packs, naming={args.naming}, "
+        f"basic_writes={args.basic_writes}, safety_writes={args.safety_writes})"
+    )
     print(f"wrote {args.package_out}")
     print(f"wrote {args.verify_out}")
     return 0

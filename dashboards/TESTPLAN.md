@@ -43,7 +43,7 @@ This confirms HA created the *exact* ids the dashboard expects, before importing
 | Line | Expected | If not… |
 |---|---|---|
 | `BMS n read-only: 61/61 present` | 61/61 for every online pack (16S) | A whole pack at `0/61` → that pack is offline or named differently. A **few** missing across *all* packs → an object_id mismatch; report it to me with the `not resolving:` list. Only `last_seen` missing → bridge older than 2.1.0, or HA registered it under a different id (rename it to `sensor.bms_<n>_device_last_seen`). |
-| `BMS n controls …: 0/34` | `0/34` if write tiers are **off**; `34/34` if both **on** | Matches your Phase 0.4 note. Partial (e.g. `11/34`) means only `enable_basic_writes` is on — expected. |
+| `BMS n settings: 34/34 present` | `34/34`, whatever the write tiers | Generate with the tier flags matching your Phase 0.4 note. Missing rows with tiers off → read-only ids differ from the description slug; missing rows with a tier on → the controls were not recreated yet (restart the add-on) or got a different id. Report the `not resolving:` list. |
 | `Bank aggregates: 0/4` | `0/4` now (package not installed yet) | Becomes `4/4` after Phase 3. |
 
 > Count: 26 pack sensors (incl. `last_seen`) + 3 binary sensors + 2 per cell.
@@ -111,7 +111,7 @@ Tap a pack heading → its `BMS n` subview opens.
 | 5.2 | Live temps | MOS + wired probes show °C; unwired probes Unavailable (ok) |
 | 5.3 | Cells | voltage table renders; **highest cell blue, lowest red, rest green**; resistance table populated; row count matches cell count |
 | 5.4 | Diagnostics | SoH, cycles, runtime, capacities, nameplate (model/hw/sw/serial) all populated |
-| 5.5 | Controls | If tiers off: rows Unavailable + the warning note shows. If on: numbers/switches editable |
+| 5.5 | Controls | Every row shows a value. Tier off: read-only rows, note says "read-only". Tier on: numbers/switches editable, note says "editable" |
 | 5.6 | History | 3 history-graphs draw lines after a few minutes of data |
 | 5.7 | Nav | Each `BMS n` subview is reachable; back returns to Overview; tab bar shows only "Overview" (subviews hidden) |
 
@@ -121,10 +121,11 @@ Tap a pack heading → its `BMS n` subview opens.
 
 | # | Check | Pass criteria |
 |---|---|---|
-| 6.1 | Enable basic writes | Set `enable_basic_writes: true`, restart add-on |
-| 6.2 | Control appears | A basic `number`/`switch` becomes editable in Controls |
+| 6.1 | Enable basic writes | Set `enable_basic_writes: true`, restart add-on (manual dashboard: regenerate with `--basic-writes` and re-paste) |
+| 6.2 | Control appears | A basic row becomes an editable `number`/`switch` in Controls |
 | 6.3 | Round-trip | Nudge a safe value (e.g. balance trigger), confirm it sticks and reads back; revert it |
-| 6.4 | Gating | A safety `number` stays Unavailable while `enable_safety_writes` is off |
+| 6.4 | Gating | Safety rows stay read-only (values shown, not editable) while `enable_safety_writes` is off |
+| 6.5 | Disable again | Set `enable_basic_writes: false`, restart: basic rows are read-only again, no Unavailable rows, no leftover `number`/`switch` entities |
 
 ## Results
 
