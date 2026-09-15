@@ -35,7 +35,7 @@ from jkbms2mqtt.entities import (
     WritableEntity,
     expand_cell_entities,
 )
-from jkbms2mqtt.protocol.jk_modbus import JkRealtime, JkStaticInfo
+from jkbms2mqtt.protocol.jk_modbus import MAX_CELLS, JkRealtime, JkStaticInfo
 from jkbms2mqtt.protocol.jk_settings import (
     Encoding,
     PackedBitDef,
@@ -52,10 +52,14 @@ BRIDGE_AVAILABILITY_TOPIC = "jkbms2mqtt/availability"
 
 @dataclass(frozen=True, slots=True)
 class DiscoveryMessage:
-    """One HA Discovery retained message."""
+    """One HA Discovery retained message.
+
+    ``payload=None`` is a removal: it renders as an empty retained message,
+    which clears the broker's retained config and makes HA delete the entity.
+    """
 
     topic: str
-    payload: dict[str, Any]
+    payload: dict[str, Any] | None
 
 
 # -- HA Discovery payload builders ----------------------------------------------------
@@ -88,6 +92,39 @@ def _discovery_topic(
     discovery_prefix: str, component: Component, bms_name: str, object_id: str
 ) -> str:
     return f"{discovery_prefix}/{component.value}/{bms_name}_device_{object_id}/config"
+
+
+def discovery_removal(
+    discovery_prefix: str, component: Component, bms_name: str, object_id: str
+) -> DiscoveryMessage:
+    """Empty retained config for a topic this bridge may have published before.
+
+    The component is part of the discovery topic, so an entity that changes
+    component (tier toggled), disappears (fewer cells) or gets hidden (debug
+    flag off) leaves its old retained config behind. Publishing an empty
+    retained payload there clears it; for a topic that never existed this is
+    a no-op for both broker and HA.
+    """
+    return DiscoveryMessage(
+        topic=_discovery_topic(discovery_prefix, component, bms_name, object_id),
+        payload=None,
+    )
+
+
+def _writable_component(*, is_bool: bool, writable: bool) -> Component:
+    if writable:
+        return Component.SWITCH if is_bool else Component.NUMBER
+    return Component.BINARY_SENSOR if is_bool else Component.SENSOR
+
+
+def _read_only_category(entity_category: str | None) -> str | None:
+    """Category for a setting published read-only because its tier is off.
+
+    HA refuses to add a sensor / binary_sensor with ``entity_category:
+    config`` ("cannot be added as the entity category is set to config"), so
+    the read-only mirror of a configuration entity goes to Diagnostics.
+    """
+    return "diagnostic" if entity_category == "config" else entity_category
 
 
 def _base_payload(
@@ -167,22 +204,22 @@ def discovery_for_writable(
 
     When ``writable`` is True the entity is published as a ``number``/``switch``
     (HA shows controls). When False it is published as ``sensor``/
-    ``binary_sensor`` (status only). Either way the same state topic carries
-    the current BMS value.
+    ``binary_sensor`` (status only, ``config`` category downgraded to
+    ``diagnostic``). Either way the same state topic carries the current BMS
+    value.
     """
-    is_bool = entity.register.encoding is Encoding.BOOL32
-    if writable:
-        component = Component.SWITCH if is_bool else Component.NUMBER
-    else:
-        component = Component.BINARY_SENSOR if is_bool else Component.SENSOR
-
+    component = _writable_component(
+        is_bool=entity.register.encoding is Encoding.BOOL32, writable=writable
+    )
     payload = _base_payload(
         bms_name,
         component=component,
         object_id=entity.object_id,
         name=entity.description,
         topic_suffix=entity.topic_suffix,
-        entity_category=entity.entity_category,
+        entity_category=(
+            entity.entity_category if writable else _read_only_category(entity.entity_category)
+        ),
     )
     if writable:
         payload["command_topic"] = _command_topic(bms_name, entity.topic_suffix)
@@ -213,14 +250,16 @@ def discovery_for_packed_bit(
     entity: PackedBitEntity, bms_name: str, *, discovery_prefix: str, writable: bool
 ) -> DiscoveryMessage:
     """Discovery for a packed-bit boolean — switch when writable, binary sensor otherwise."""
-    component = Component.SWITCH if writable else Component.BINARY_SENSOR
+    component = _writable_component(is_bool=True, writable=writable)
     payload = _base_payload(
         bms_name,
         component=component,
         object_id=entity.object_id,
         name=entity.bit.description,
         topic_suffix=entity.topic_suffix,
-        entity_category=entity.entity_category,
+        entity_category=(
+            entity.entity_category if writable else _read_only_category(entity.entity_category)
+        ),
     )
     payload["payload_on"] = "ON"
     payload["payload_off"] = "OFF"
@@ -251,20 +290,25 @@ def build_discovery_messages(
 ) -> list[DiscoveryMessage]:
     """Build every HA Discovery message appropriate for the current settings.
 
-    Writable entities are only emitted when the matching tier toggle is on.
-    Entities flagged ``verified=False`` are skipped unless
+    Writable entities are published as controls only when the matching tier
+    toggle is on. Entities flagged ``verified=False`` are skipped unless
     ``settings.debug_unverified_fields`` is True.
+
+    Alongside the configs, removals (``payload=None``) are emitted for every
+    topic a previous run with other settings could have left retained: the
+    other component of each writable / packed bit, cells above ``cell_count``
+    and hidden unverified entities.
     """
     discovery_prefix = settings.discovery_prefix
     debug = settings.debug_unverified_fields
     messages: list[DiscoveryMessage] = []
 
-    for e in LIVE_SENSORS:
+    def remove(component: Component, object_id: str) -> None:
+        messages.append(discovery_removal(discovery_prefix, component, bms_name, object_id))
+
+    for e in (*LIVE_SENSORS, *LIVE_BINARY_SENSORS):
         if not e.verified and not debug:
-            continue
-        messages.append(discovery_for_read_only(e, bms_name, discovery_prefix=discovery_prefix))
-    for e in LIVE_BINARY_SENSORS:
-        if not e.verified and not debug:
+            remove(e.component, e.object_id)
             continue
         messages.append(discovery_for_read_only(e, bms_name, discovery_prefix=discovery_prefix))
     for e in CELL_STATS_SENSORS:
@@ -275,6 +319,11 @@ def build_discovery_messages(
         messages.append(discovery_for_read_only(e, bms_name, discovery_prefix=discovery_prefix))
     for e in expand_cell_entities(cell_count):
         messages.append(discovery_for_read_only(e, bms_name, discovery_prefix=discovery_prefix))
+    # The runner announces with a default of MAX_CELLS before the first poll,
+    # so a smaller pack would otherwise keep those extra cells retained.
+    for n in range(cell_count + 1, MAX_CELLS + 1):
+        remove(Component.SENSOR, f"cell_{n}_volt")
+        remove(Component.SENSOR, f"cell_{n}_ohm")
     for e in FIXED_SENSORS:
         if not e.verified and not debug:  # pragma: no branch - no unverified FIXED entries today
             continue  # pragma: no cover
@@ -283,7 +332,10 @@ def build_discovery_messages(
         messages.append(discovery_for_read_only(e, bms_name, discovery_prefix=discovery_prefix))
 
     for w in WRITABLE_ENTITIES:
+        is_bool = w.register.encoding is Encoding.BOOL32
         if not w.verified and not debug:  # pragma: no branch - no unverified writables today
+            for flag in (True, False):  # pragma: no cover
+                remove(_writable_component(is_bool=is_bool, writable=flag), w.object_id)
             continue  # pragma: no cover
         writable = _tier_enabled(settings, w.register.tier)
         messages.append(
@@ -291,9 +343,12 @@ def build_discovery_messages(
                 w, bms_name, discovery_prefix=discovery_prefix, writable=writable
             )
         )
+        remove(_writable_component(is_bool=is_bool, writable=not writable), w.object_id)
 
     for p in PACKED_BIT_ENTITIES:
         if not p.verified and not debug:
+            for flag in (True, False):
+                remove(_writable_component(is_bool=True, writable=flag), p.object_id)
             continue
         writable = _tier_enabled(settings, p.bit.tier)
         messages.append(
@@ -301,6 +356,7 @@ def build_discovery_messages(
                 p, bms_name, discovery_prefix=discovery_prefix, writable=writable
             )
         )
+        remove(_writable_component(is_bool=True, writable=not writable), p.object_id)
 
     return messages
 
@@ -433,5 +489,7 @@ def _format(value: object, decimals: int | None = None) -> str:
 
 
 def render(message: DiscoveryMessage) -> tuple[str, bytes]:
-    """Serialise a discovery message for ``mqtt.publish``."""
+    """Serialise a discovery message for ``mqtt.publish``; a removal is ``b""``."""
+    if message.payload is None:
+        return message.topic, b""
     return message.topic, json.dumps(message.payload, separators=(",", ":")).encode()

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import UTC, datetime
 
 import pytest
@@ -15,6 +16,7 @@ from jkbms2mqtt.entities import (
 )
 from jkbms2mqtt.mqtt import (
     BRIDGE_AVAILABILITY_TOPIC,
+    DiscoveryMessage,
     _format,
     build_discovery_messages,
     discovery_for_packed_bit,
@@ -88,11 +90,132 @@ def _sample_static() -> JkStaticInfo:
 # -- Discovery messages ---------------------------------------------------------------
 
 
+def _config_topics(msgs: list[DiscoveryMessage]) -> list[str]:
+    """Topics that carry a config (removals excluded)."""
+    return [m.topic for m in msgs if m.payload is not None]
+
+
+def _removal_topics(msgs: list[DiscoveryMessage]) -> set[str]:
+    return {m.topic for m in msgs if m.payload is None}
+
+
+class TestReadOnlyFallbackCategory:
+    """HA rejects entity_category=config on sensor / binary_sensor (issue #16)."""
+
+    @pytest.mark.parametrize("debug", [False, True])
+    def test_no_read_only_payload_is_config_when_tiers_off(self, debug: bool) -> None:
+        s = _settings(debug_unverified_fields=debug)
+        msgs = build_discovery_messages(settings=s, bms_name="BMS_1", cell_count=16)
+        offenders = [
+            m.topic
+            for m in msgs
+            if m.payload is not None
+            and ("/sensor/" in m.topic or "/binary_sensor/" in m.topic)
+            and m.payload.get("entity_category") == "config"
+        ]
+        assert offenders == []
+
+    def test_controls_keep_config_when_tiers_on(self) -> None:
+        s = _settings(
+            enable_basic_writes=True, enable_safety_writes=True, debug_unverified_fields=True
+        )
+        msgs = build_discovery_messages(settings=s, bms_name="BMS_1", cell_count=16)
+        controls = [
+            m for m in msgs
+            if m.payload is not None and ("/number/" in m.topic or "/switch/" in m.topic)
+        ]
+        assert len(controls) == len(WRITABLE_ENTITIES) + len(PACKED_BIT_ENTITIES)
+        assert all(m.payload["entity_category"] == "config" for m in controls)
+
+
+class TestStaleDiscoveryRemoval:
+    """Retained configs a previous run may have left behind get cleared (issue #17)."""
+
+    def test_tier_off_publishes_sensor_and_removes_number(self) -> None:
+        msgs = build_discovery_messages(settings=_settings(), bms_name="BMS_1", cell_count=16)
+        assert "homeassistant/sensor/BMS_1_device_max_charge_current/config" in (
+            _config_topics(msgs)
+        )
+        assert "homeassistant/number/BMS_1_device_max_charge_current/config" in (
+            _removal_topics(msgs)
+        )
+
+    def test_tier_on_publishes_number_and_removes_sensor(self) -> None:
+        s = _settings(enable_safety_writes=True)
+        msgs = build_discovery_messages(settings=s, bms_name="BMS_1", cell_count=16)
+        assert "homeassistant/number/BMS_1_device_max_charge_current/config" in (
+            _config_topics(msgs)
+        )
+        assert "homeassistant/sensor/BMS_1_device_max_charge_current/config" in (
+            _removal_topics(msgs)
+        )
+
+    @pytest.mark.parametrize("tiers_on", [False, True])
+    def test_bool_writables_remove_other_component(self, tiers_on: bool) -> None:
+        s = _settings(enable_basic_writes=tiers_on)
+        msgs = build_discovery_messages(settings=s, bms_name="BMS_1", cell_count=16)
+        live, stale = ("switch", "binary_sensor") if tiers_on else ("binary_sensor", "switch")
+        assert f"homeassistant/{live}/BMS_1_device_charging_switch/config" in _config_topics(msgs)
+        assert f"homeassistant/{stale}/BMS_1_device_charging_switch/config" in (
+            _removal_topics(msgs)
+        )
+
+    @pytest.mark.parametrize("tiers_on", [False, True])
+    def test_every_writable_has_exactly_one_config_and_one_removal(self, tiers_on: bool) -> None:
+        s = _settings(
+            enable_basic_writes=tiers_on, enable_safety_writes=tiers_on,
+            debug_unverified_fields=True,
+        )
+        msgs = build_discovery_messages(settings=s, bms_name="BMS_1", cell_count=16)
+        for object_id in (
+            *(w.object_id for w in WRITABLE_ENTITIES),
+            *(p.object_id for p in PACKED_BIT_ENTITIES),
+        ):
+            suffix = f"/BMS_1_device_{object_id}/config"
+            assert sum(t.endswith(suffix) for t in _config_topics(msgs)) == 1
+            assert sum(t.endswith(suffix) for t in _removal_topics(msgs)) == 1
+
+    def test_removal_never_targets_a_published_config(self) -> None:
+        for s in (_settings(), _settings(enable_basic_writes=True, enable_safety_writes=True)):
+            for debug in (False, True):
+                msgs = build_discovery_messages(
+                    settings=s.model_copy(update={"debug_unverified_fields": debug}),
+                    bms_name="BMS_1", cell_count=13,
+                )
+                assert not set(_config_topics(msgs)) & _removal_topics(msgs)
+
+    def test_cells_above_count_are_removed(self) -> None:
+        msgs = build_discovery_messages(settings=_settings(), bms_name="BMS_1", cell_count=13)
+        configs, removals = _config_topics(msgs), _removal_topics(msgs)
+        assert "homeassistant/sensor/BMS_1_device_cell_13_volt/config" in configs
+        for n in (14, 15, 16):
+            assert f"homeassistant/sensor/BMS_1_device_cell_{n}_volt/config" in removals
+            assert f"homeassistant/sensor/BMS_1_device_cell_{n}_ohm/config" in removals
+        assert not any("cell_13_" in t for t in removals)
+
+    def test_no_cell_removals_at_max_cells(self) -> None:
+        msgs = build_discovery_messages(settings=_settings(), bms_name="BMS_1", cell_count=16)
+        # Per-cell entities only; writables like cell_soc100_voltage have removals too.
+        assert not any(re.search(r"_device_cell_\d+_", t) for t in _removal_topics(msgs))
+
+    def test_hidden_unverified_entities_are_removed(self) -> None:
+        msgs = build_discovery_messages(settings=_settings(), bms_name="BMS_1", cell_count=16)
+        removals = _removal_topics(msgs)
+        assert "homeassistant/sensor/BMS_1_device_heating_current/config" in removals
+        assert "homeassistant/binary_sensor/BMS_1_device_heating/config" in removals
+        assert "homeassistant/switch/BMS_1_device_smart_sleep_switch/config" in removals
+        assert "homeassistant/binary_sensor/BMS_1_device_smart_sleep_switch/config" in removals
+
+    def test_render_removal_is_empty_payload(self) -> None:
+        msg = DiscoveryMessage(topic="homeassistant/sensor/x/config", payload=None)
+        assert render(msg) == ("homeassistant/sensor/x/config", b"")
+
+
 class TestBuildDiscoveryMessages:
     def test_read_only_entities_always_published(self) -> None:
         s = _settings()
         msgs = build_discovery_messages(settings=s, bms_name="BMS_1", cell_count=16)
-        topics = [m.topic for m in msgs]
+        topics = _config_topics(msgs)
         # Topic shape: homeassistant/sensor/BMS_1_device_<obj>/config
         assert any(t == "homeassistant/sensor/BMS_1_device_total_voltage/config" for t in topics)
         assert any(t == "homeassistant/sensor/BMS_1_device_cell_1_volt/config" for t in topics)
@@ -101,7 +224,7 @@ class TestBuildDiscoveryMessages:
     def test_writables_visible_as_status_when_toggles_off(self) -> None:
         s = _settings()
         msgs = build_discovery_messages(settings=s, bms_name="BMS_1", cell_count=16)
-        topics = [m.topic for m in msgs]
+        topics = _config_topics(msgs)
         # Both basic + safety numeric writables show up as plain sensor when
         # their tier is off — never silently hidden.
         assert any(
@@ -114,7 +237,7 @@ class TestBuildDiscoveryMessages:
     def test_unverified_entities_hidden_by_default(self) -> None:
         s = _settings()
         msgs = build_discovery_messages(settings=s, bms_name="BMS_1", cell_count=16)
-        topics = [m.topic for m in msgs]
+        topics = _config_topics(msgs)
         # Packed-bit entities and the heating / charge_status fields are
         # unverified and so should not appear unless debug flag is on.
         assert not any("BMS_1_device_smart_sleep_switch" in t for t in topics)
@@ -124,14 +247,14 @@ class TestBuildDiscoveryMessages:
     def test_unverified_entities_surface_with_debug_flag(self) -> None:
         s = _settings(debug_unverified_fields=True)
         msgs = build_discovery_messages(settings=s, bms_name="BMS_1", cell_count=16)
-        topics = [m.topic for m in msgs]
+        topics = _config_topics(msgs)
         assert any("BMS_1_device_smart_sleep_switch" in t for t in topics)
         assert any("BMS_1_device_heating" in t for t in topics)
 
     def test_basic_writables_when_basic_on(self) -> None:
         s = _settings(enable_basic_writes=True)
         msgs = build_discovery_messages(settings=s, bms_name="BMS_1", cell_count=16)
-        topics = [m.topic for m in msgs]
+        topics = _config_topics(msgs)
         # Basic-tier numeric is now a `number`.
         assert any("/number/BMS_1_device_smart_sleep_voltage/config" in t for t in topics)
         # Safety-tier max_charge_current still appears, just as a sensor.
@@ -141,7 +264,7 @@ class TestBuildDiscoveryMessages:
     def test_safety_writables_when_safety_on(self) -> None:
         s = _settings(enable_safety_writes=True)
         msgs = build_discovery_messages(settings=s, bms_name="BMS_1", cell_count=16)
-        topics = [m.topic for m in msgs]
+        topics = _config_topics(msgs)
         assert any("/number/BMS_1_device_max_charge_current/config" in t for t in topics)
         # Basic-tier numeric shows up as sensor.
         assert any("/sensor/BMS_1_device_smart_sleep_voltage/config" in t for t in topics)
@@ -155,7 +278,7 @@ class TestBuildDiscoveryMessages:
             debug_unverified_fields=True,
         )
         msgs = build_discovery_messages(settings=s, bms_name="BMS_1", cell_count=16)
-        topics = [m.topic for m in msgs]
+        topics = _config_topics(msgs)
         assert any("/switch/BMS_1_device_smart_sleep_switch/config" in t for t in topics)
 
 
@@ -292,14 +415,21 @@ class TestDiscoveryPayloads:
         )
         assert msg.payload["entity_category"] == "config"
 
-    def test_entity_category_emitted_for_writable_when_downgraded_to_sensor(self) -> None:
-        """When the tier is off the writable shows as a sensor, but
-        entity_category=config still applies."""
+    def test_entity_category_diagnostic_for_writable_when_downgraded_to_sensor(self) -> None:
+        """When the tier is off the writable shows as a sensor; HA rejects
+        entity_category=config there, so it becomes diagnostic."""
         w = next(x for x in WRITABLE_ENTITIES if x.object_id == "max_charge_current")
         msg = discovery_for_writable(
             w, "BMS_1", discovery_prefix="homeassistant", writable=False
         )
-        assert msg.payload["entity_category"] == "config"
+        assert msg.payload["entity_category"] == "diagnostic"
+
+    def test_entity_category_diagnostic_for_packed_bit_when_downgraded(self) -> None:
+        bit = PACKED_BIT_ENTITIES[0]
+        msg = discovery_for_packed_bit(
+            bit, "BMS_1", discovery_prefix="homeassistant", writable=False
+        )
+        assert msg.payload["entity_category"] == "diagnostic"
 
     def test_entity_category_emitted_for_packed_bit(self) -> None:
         bit = PACKED_BIT_ENTITIES[0]
@@ -370,6 +500,8 @@ class TestFreshness:
         )
         msgs = build_discovery_messages(settings=s, bms_name="BMS_1", cell_count=16)
         for m in msgs:
+            if m.payload is None:
+                continue
             if m.payload["unique_id"] == "BMS_1_device_last_seen":
                 assert "availability_topic" not in m.payload
             else:
@@ -377,7 +509,10 @@ class TestFreshness:
 
     def test_last_seen_discovery_is_timestamp_sensor(self) -> None:
         msgs = build_discovery_messages(settings=_settings(), bms_name="BMS_1", cell_count=16)
-        m = next(x for x in msgs if x.payload["unique_id"] == "BMS_1_device_last_seen")
+        m = next(
+            x for x in msgs
+            if x.payload is not None and x.payload["unique_id"] == "BMS_1_device_last_seen"
+        )
         assert m.topic == "homeassistant/sensor/BMS_1_device_last_seen/config"
         assert m.payload["device_class"] == "timestamp"
         assert m.payload["state_topic"] == "BMS_1/Last_seen"
