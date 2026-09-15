@@ -341,7 +341,7 @@ def _summary_tile(primary: str, secondary: str, icon: str, color: str, entity: s
 
 
 def _summary_attr_tile(
-    primary: str, label: str, attr_entity: str, icon: str, color: str, entity: str
+    primary: str, label: str, attr_entity: str, *, icon: str, color: str, entity: str
 ) -> dict:
     """A tile whose secondary shows ``<label> (<reporting BMS>)`` from the ``bms`` attr.
 
@@ -386,18 +386,21 @@ def bank_summary_section() -> dict:
             ),
             _summary_attr_tile(
                 f"{{{{ states('{maxtemp}') }}}} °C", "Max temp", maxtemp,
-                "mdi:thermometer", "deep-orange", maxtemp,
+                icon="mdi:thermometer", color="deep-orange", entity=maxtemp,
             ),
             _summary_attr_tile(
                 f"{{{{ states('{minsoc}') }}}} %", "Min SoC", minsoc,
-                "mdi:battery-low", "green", minsoc,
+                icon="mdi:battery-low", color="green", entity=minsoc,
             ),
             _summary_attr_tile(
                 f"{{% if is_state('{alarm}', 'on') %}}Alarm{{% else %}}OK{{% endif %}}",
                 "Alarms", alarm,
-                f"{{% if is_state('{alarm}', 'on') %}}mdi:alert{{% else %}}mdi:shield-check{{% endif %}}",
-                f"{{% if is_state('{alarm}', 'on') %}}red{{% else %}}green{{% endif %}}",
-                alarm,
+                icon=(
+                    f"{{% if is_state('{alarm}', 'on') %}}mdi:alert"
+                    f"{{% else %}}mdi:shield-check{{% endif %}}"
+                ),
+                color=f"{{% if is_state('{alarm}', 'on') %}}red{{% else %}}green{{% endif %}}",
+                entity=alarm,
             ),
         ],
     }
