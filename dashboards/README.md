@@ -104,12 +104,12 @@ The dashboard uses these custom cards — install each via [HACS](https://hacs.x
 | Card | Used for |
 |---|---|
 | **Mushroom** | Charge / discharge / balance state tiles, cell stats, alarm chip |
-| **bar-card** | SoC bar on the Overview tiles |
 | **entity-progress-card** | SoC progress bar on the detail Live section |
 | **stack-in-card** | Per-cell voltage / resistance tables |
 
-History uses the built-in `history-graph` card (no HACS needed). Gauges,
-`entities`, `grid`, `heading`, `markdown`, `sections` are all core.
+History uses the built-in `history-graph` card (no HACS needed). `gauge`
+(including the Overview SoC gauge), `entities`, `grid`, `heading`, `markdown`
+and `sections` are all core.
 
 ## 3. Import the dashboard
 

@@ -85,24 +85,16 @@ views:
         entity: sensor.bms_1_last_seen
         tap_action:
           action: more-info
-      - type: custom:bar-card
+      - type: gauge
         entity: sensor.bms_1_state_of_charge
         name: SoC
         min: 0
         max: 100
-        positions:
-          icon: 'off'
-          indicator: 'off'
+        needle: true
         severity:
-        - color: '#fa4b54'
-          from: 0
-          to: 20
-        - color: '#ffa600'
-          from: 20
-          to: 50
-        - color: '#41cd52'
-          from: 50
-          to: 100
+          red: 0
+          yellow: 20
+          green: 50
       - type: grid
         columns: 3
         square: false
@@ -201,24 +193,16 @@ views:
         entity: sensor.bms_2_last_seen
         tap_action:
           action: more-info
-      - type: custom:bar-card
+      - type: gauge
         entity: sensor.bms_2_state_of_charge
         name: SoC
         min: 0
         max: 100
-        positions:
-          icon: 'off'
-          indicator: 'off'
+        needle: true
         severity:
-        - color: '#fa4b54'
-          from: 0
-          to: 20
-        - color: '#ffa600'
-          from: 20
-          to: 50
-        - color: '#41cd52'
-          from: 50
-          to: 100
+          red: 0
+          yellow: 20
+          green: 50
       - type: grid
         columns: 3
         square: false
@@ -317,24 +301,16 @@ views:
         entity: sensor.bms_3_last_seen
         tap_action:
           action: more-info
-      - type: custom:bar-card
+      - type: gauge
         entity: sensor.bms_3_state_of_charge
         name: SoC
         min: 0
         max: 100
-        positions:
-          icon: 'off'
-          indicator: 'off'
+        needle: true
         severity:
-        - color: '#fa4b54'
-          from: 0
-          to: 20
-        - color: '#ffa600'
-          from: 20
-          to: 50
-        - color: '#41cd52'
-          from: 50
-          to: 100
+          red: 0
+          yellow: 20
+          green: 50
       - type: grid
         columns: 3
         square: false
@@ -433,24 +409,16 @@ views:
         entity: sensor.bms_4_last_seen
         tap_action:
           action: more-info
-      - type: custom:bar-card
+      - type: gauge
         entity: sensor.bms_4_state_of_charge
         name: SoC
         min: 0
         max: 100
-        positions:
-          icon: 'off'
-          indicator: 'off'
+        needle: true
         severity:
-        - color: '#fa4b54'
-          from: 0
-          to: 20
-        - color: '#ffa600'
-          from: 20
-          to: 50
-        - color: '#41cd52'
-          from: 50
-          to: 100
+          red: 0
+          yellow: 20
+          green: 50
       - type: grid
         columns: 3
         square: false
@@ -549,24 +517,16 @@ views:
         entity: sensor.bms_5_last_seen
         tap_action:
           action: more-info
-      - type: custom:bar-card
+      - type: gauge
         entity: sensor.bms_5_state_of_charge
         name: SoC
         min: 0
         max: 100
-        positions:
-          icon: 'off'
-          indicator: 'off'
+        needle: true
         severity:
-        - color: '#fa4b54'
-          from: 0
-          to: 20
-        - color: '#ffa600'
-          from: 20
-          to: 50
-        - color: '#41cd52'
-          from: 50
-          to: 100
+          red: 0
+          yellow: 20
+          green: 50
       - type: grid
         columns: 3
         square: false
@@ -665,24 +625,16 @@ views:
         entity: sensor.bms_6_last_seen
         tap_action:
           action: more-info
-      - type: custom:bar-card
+      - type: gauge
         entity: sensor.bms_6_state_of_charge
         name: SoC
         min: 0
         max: 100
-        positions:
-          icon: 'off'
-          indicator: 'off'
+        needle: true
         severity:
-        - color: '#fa4b54'
-          from: 0
-          to: 20
-        - color: '#ffa600'
-          from: 20
-          to: 50
-        - color: '#41cd52'
-          from: 50
-          to: 100
+          red: 0
+          yellow: 20
+          green: 50
       - type: grid
         columns: 3
         square: false

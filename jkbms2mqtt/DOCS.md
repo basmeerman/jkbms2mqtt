@@ -98,8 +98,8 @@ your setup. Home Assistant can't let an add-on register a dashboard for you, so
 there is a small one-time setup:
 
 **1. Install the frontend cards** (once) via [HACS](https://hacs.xyz/) → Frontend,
-then restart HA: **Mushroom**, **bar-card**, **entity-progress-card**,
-**stack-in-card**. (History uses the built-in graph card.)
+then restart HA: **Mushroom**, **entity-progress-card**, **stack-in-card**.
+(Gauges, graphs and the SoC gauge are built-in cards.)
 
 **2. Add this block to `configuration.yaml`** (once), then restart HA:
 

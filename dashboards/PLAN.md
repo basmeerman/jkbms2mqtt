@@ -64,8 +64,8 @@ because of five independent mismatches:
 What is reused from the old construct: the per-pack `${n}` templating idea, the
 Overview-tiles → per-pack-`subview` navigation model (full-V2's pattern, which
 keeps the tab bar clean), the max/min/normal cell-voltage colouring table, and
-the card set (mushroom, bar-card, entity-progress, stack-in, button,
-history-graph).
+the card set (mushroom, entity-progress, stack-in, button, history-graph, and
+the core gauge).
 
 ## Tier gating & exclusions
 

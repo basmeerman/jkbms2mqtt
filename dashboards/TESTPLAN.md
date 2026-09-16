@@ -64,7 +64,6 @@ list back to me — that's a naming bug to fix in the generator before import.
 | Card | Needed by |
 |---|---|
 | Mushroom | charge/discharge/balance tiles, cell chips, alarm chip |
-| bar-card | Overview SoC bar |
 | entity-progress-card | detail SoC bar |
 | stack-in-card | per-cell voltage / resistance tables |
 
@@ -98,7 +97,7 @@ list back to me — that's a naming bug to fix in the generator before import.
 |---|---|---|
 | 4.1 | No YAML error | Editor saves without "Unable to parse" |
 | 4.2 | 6 tiles render | Overview shows one tile per online pack |
-| 4.3 | SoC bar | bar-card shows colour by level (red<20, orange<50, green) |
+| 4.3 | SoC gauge | core gauge shows colour by level (red <20, yellow <50, green above) |
 | 4.4 | Gauges | Voltage/Power/Current gauges show needles, sane ranges |
 | 4.5 | Alarm chip | green "None" when no alarm; cell stats populated |
 | 4.6 | Offline pack hidden | If a pack is offline its tile does **not** render (visibility gate) |

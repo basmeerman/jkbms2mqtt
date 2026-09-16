@@ -61,7 +61,7 @@ In the add-on **Configuration**:
 
 ### 3. Install the dashboard cards (once)
 
-Via [HACS](https://hacs.xyz/) → Frontend, install **Mushroom**, **bar-card**,
+Via [HACS](https://hacs.xyz/) → Frontend, install **Mushroom**,
 **entity-progress-card**, **stack-in-card**, then **restart Home Assistant**.
 
 ### 4. Show the dashboard (one-time config block)
