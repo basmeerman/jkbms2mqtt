@@ -70,13 +70,20 @@ name and the entity's name:
 |---|---|---|
 | `BMS_1` | Total voltage | `sensor.bms_1_total_voltage` |
 | `BMS_1` | State of charge | `sensor.bms_1_state_of_charge` |
-| `BMS_1` | Maximum charge current | `sensor.bms_1_maximum_charge_current` (`number.…` when the safety tier is on) |
+| `BMS_1` | Maximum charge current | `sensor.bms_1_maximum_charge_current` |
+| `BMS_1` | Maximum charge current control | `number.bms_1_maximum_charge_current_control` (only while the safety tier is on) |
 | `BMS_1` | Cell 1 resistance | `sensor.bms_1_cell_1_resistance` |
 
 This is Home Assistant's [documented convention](https://developers.home-assistant.io/docs/core/entity/#entity-naming);
 HA core warns that "in most cases, entities should not set entity_id". Builds
 before 2.2.0 did override it — first with `object_id` (removed by HA in 2026.4)
 and then with `default_entity_id` — so older installs carry different ids.
+
+Since 2.4.0 a setting is two entities: the read-only twin above, which always
+exists, and a `…_control` entity that exists only while its write tier is on.
+Toggling a tier therefore adds or removes the control and leaves the twin's id
+alone. Before 2.4.0 the setting itself changed component with the tier, so its
+id changed too — which silently broke anything referencing it.
 
 **Home Assistant never renames an entity it has already registered.** An
 install that ran an earlier build therefore keeps its old ids, and the

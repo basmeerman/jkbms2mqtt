@@ -55,6 +55,28 @@ def writable_component(*, is_bool: bool, writable: bool) -> Component:
     return Component.BINARY_SENSOR if is_bool else Component.SENSOR
 
 
+def control_object_id(object_id: str) -> str:
+    """Object id of the *control* twin of a writable setting.
+
+    Every setting is published twice: a read-only ``sensor`` /
+    ``binary_sensor`` that always exists, and — only while its write tier is
+    on — this control. They need separate object ids so their unique_ids, and
+    therefore their Home Assistant entities, stay distinct.
+    """
+    return f"{object_id}_control"
+
+
+def control_name(name: str) -> str:
+    """Entity name of that control twin.
+
+    HA derives the entity id from the device name plus this, so the control
+    lands next to its read-only twin: "Maximum charge current" becomes
+    ``sensor.bms_1_maximum_charge_current`` and "Maximum charge current
+    control" becomes ``number.bms_1_maximum_charge_current_control``.
+    """
+    return f"{name} control"
+
+
 @dataclass(frozen=True, slots=True)
 class ReadOnlyEntity:
     """A telemetry entity. ``source_field`` is the attribute name on the decoded
@@ -104,11 +126,14 @@ class ReadOnlyEntity:
 class WritableEntity:
     """A writable parameter backed by a single 32-bit register (function 0x10).
 
-    Defaults ``entity_category`` to "config" — every writable setting tunes
-    device configuration and therefore belongs in HA's Configuration section
-    while it is surfaced as a number/switch (tier on). HA rejects "config" on
-    sensors, so the read-only mirror (tier off) is published as "diagnostic";
-    see ``mqtt._read_only_category``.
+    Published as two Home Assistant entities: a read-only ``sensor`` /
+    ``binary_sensor`` that always exists, and — only while the write tier is
+    on — a ``number`` / ``switch`` control (see ``control_object_id``).
+
+    ``entity_category`` is the control's: "config", since a settable threshold
+    belongs in HA's Configuration section. The read-only twin downgrades it to
+    "diagnostic", because HA rejects "config" on sensors — see
+    ``mqtt._read_only_category``.
     """
 
     object_id: str
@@ -126,7 +151,8 @@ class PackedBitEntity:
 
     Same reasoning as ``WritableEntity``: a device-mode toggle is always a
     configuration entity, so default ``entity_category`` to "config" (again
-    "diagnostic" when published read-only).
+    "diagnostic" on the read-only twin), and it is likewise published as a
+    permanent ``binary_sensor`` plus a ``switch`` control while its tier is on.
     """
 
     object_id: str

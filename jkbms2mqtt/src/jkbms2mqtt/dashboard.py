@@ -40,6 +40,8 @@ from jkbms2mqtt.entities import (
     LIVE_SENSORS,
     PACKED_BIT_ENTITIES,
     WRITABLE_ENTITIES,
+    control_name,
+    control_object_id,
     expand_cell_entities,
     writable_component,
 )
@@ -69,6 +71,20 @@ def _slug_table() -> dict[str, str]:
     table = {e.object_id: _ha_slugify(e.description) for e in read_only}
     table.update({w.object_id: _ha_slugify(w.description) for w in WRITABLE_ENTITIES})
     table.update({p.object_id: _ha_slugify(p.bit.description) for p in PACKED_BIT_ENTITIES})
+    # Each setting also has a control twin, published while its write tier is
+    # on, with its own name and therefore its own entity id.
+    table.update(
+        {
+            control_object_id(w.object_id): _ha_slugify(control_name(w.description))
+            for w in WRITABLE_ENTITIES
+        }
+    )
+    table.update(
+        {
+            control_object_id(p.object_id): _ha_slugify(control_name(p.bit.description))
+            for p in PACKED_BIT_ENTITIES
+        }
+    )
     return table
 
 
@@ -97,18 +113,19 @@ def tier_enabled(object_id: str, *, basic_writes: bool, safety_writes: bool) -> 
 
 
 def setting(n: int, object_id: str, *, writable: bool) -> str:
-    """Entity id of a writable setting, whose domain follows its write tier.
+    """Entity id to put on the dashboard for a writable setting.
 
-    Tier on: ``number`` / ``switch``. Tier off: the bridge publishes the same
-    object_id read-only as ``sensor`` / ``binary_sensor``.
-
-    The entity name is the same either way, so only the domain changes.
+    The bridge publishes two entities per setting: a read-only ``sensor`` /
+    ``binary_sensor`` that always exists, and a ``number`` / ``switch``
+    control that exists only while the write tier is on. Show whichever the
+    user can act on: the control when the tier is on, the read-only twin
+    otherwise.
     """
     w = _WRITABLES[object_id]
-    domain = writable_component(
-        is_bool=w.register.encoding is Encoding.BOOL32, writable=writable
-    ).value
-    return ent(domain, n, object_id)
+    is_bool = w.register.encoding is Encoding.BOOL32
+    domain = writable_component(is_bool=is_bool, writable=writable).value
+    key = control_object_id(object_id) if writable else object_id
+    return ent(domain, n, key)
 
 
 # Writable params, in dashboard order. Each renders through ``setting()``, so

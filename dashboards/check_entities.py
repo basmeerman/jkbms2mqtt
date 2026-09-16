@@ -38,6 +38,7 @@ from jkbms2mqtt.entities import (
     LIVE_BINARY_SENSORS,
     LIVE_SENSORS,
     WRITABLE_ENTITIES,
+    control_object_id,
     expand_cell_entities,
     writable_component,
 )
@@ -78,13 +79,36 @@ def bridge_entities(*, basic_writes: bool, safety_writes: bool) -> set[tuple[str
             out.add((e.component.value, e.object_id))
     for w in WRITABLE_ENTITIES:
         if w.verified:
-            writable = generate.tier_enabled(
+            is_bool = w.register.encoding is Encoding.BOOL32
+            # The read-only twin exists whatever the tier.
+            out.add((writable_component(is_bool=is_bool, writable=False).value, w.object_id))
+            if generate.tier_enabled(
                 w.object_id, basic_writes=basic_writes, safety_writes=safety_writes
-            )
-            component = writable_component(
-                is_bool=w.register.encoding is Encoding.BOOL32, writable=writable
-            )
-            out.add((component.value, w.object_id))
+            ):
+                out.add(
+                    (
+                        writable_component(is_bool=is_bool, writable=True).value,
+                        control_object_id(w.object_id),
+                    )
+                )
+    return out
+
+
+def hidden_twins(*, basic_writes: bool, safety_writes: bool) -> set[tuple[str, str]]:
+    """Read-only twins the dashboard deliberately does not show.
+
+    With a write tier on, a setting has both entities, but the dashboard shows
+    only the control — the row the user can act on. The twin is still
+    published, so exclude it from the coverage check rather than reporting it
+    as drift.
+    """
+    out: set[tuple[str, str]] = set()
+    for w in WRITABLE_ENTITIES:
+        if w.verified and generate.tier_enabled(
+            w.object_id, basic_writes=basic_writes, safety_writes=safety_writes
+        ):
+            is_bool = w.register.encoding is Encoding.BOOL32
+            out.add((writable_component(is_bool=is_bool, writable=False).value, w.object_id))
     return out
 
 
@@ -115,7 +139,9 @@ def _check(*, basic_writes: bool, safety_writes: bool) -> bool:
     bridge = bridge_entities(**tiers)
     dash = dashboard_entities(**tiers)
 
-    missing = sorted(bridge - dash - ALLOW_MISSING)  # bridge has, dashboard lacks
+    missing = sorted(
+        bridge - dash - ALLOW_MISSING - hidden_twins(**tiers)
+    )  # bridge has, dashboard lacks
     unknown = sorted(dash - bridge)  # dashboard refs, bridge doesn't publish
 
     if not missing and not unknown:

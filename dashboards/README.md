@@ -35,8 +35,8 @@ and **Diagnostics** + **Nameplate**:
 ![Pack detail — Live, Cells, Diagnostics](docs/bms_1a.png)
 
 Scrolling down: **Controls** (every BMS setting with its current value —
-editable `number`/`switch` rows when the add-on's write tier is on, read-only
-rows otherwise) and **History** graphs:
+the editable `…_control` row when the add-on's write tier is on, the read-only
+row otherwise) and **History** graphs:
 
 ![Pack detail — Controls (basic) and History](docs/bms_1b.png)
 ![Pack detail — Safety thresholds and Temperatures history](docs/bms_1c.png)
@@ -84,7 +84,8 @@ python dashboards/generate.py --bms-ids 1,2,3,4,5,6 --cells 16 --basic-writes --
 
 The tier flags must match `enable_basic_writes` / `enable_safety_writes` in the
 add-on options (both off by default), because a setting is a `number`/`switch`
-only while its tier is on and a `sensor`/`binary_sensor` otherwise.
+a `…_control` entity only while its tier is on, alongside a read-only
+`sensor`/`binary_sensor` that is always there.
 
 Requires Python 3 + PyYAML (`pip install pyyaml`) — a generator-time tool only,
 nothing extra runs in the add-on. Outputs:

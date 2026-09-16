@@ -164,10 +164,10 @@ Every BMS setting is **always visible** in Home Assistant as a status sensor
 showing its current value from the BMS. The tier toggles only control whether
 those entities are *writable*:
 
-- `enable_basic_writes: true` upgrades the basic-tier entities to `number` /
-  `switch` controls (charge / discharge / balance switches, balance
+- `enable_basic_writes: true` adds a `number` / `switch` **control** next to
+  each basic-tier setting (charge / discharge / balance switches, balance
   thresholds, smart-sleep voltage, etc.).
-- `enable_safety_writes: true` upgrades the safety-tier entities (OVP / UVP,
+- `enable_safety_writes: true` does the same for the safety-tier settings (OVP / UVP,
   max charge / discharge current, OCP delays, OTP / UTP thresholds, cell
   count). **A wrong value here can damage the cells or pose a fire risk** —
   leave off unless you know exactly what you're changing.
@@ -177,11 +177,22 @@ structured JSON error on `<bms_name>/error`. This is the default safe state:
 HA users can see what every setting is, but cannot accidentally change a
 safety-critical threshold.
 
-Changing a tier needs an add-on restart. On that restart the setting moves
-between `sensor` and `number` (or `binary_sensor` and `switch`): the bridge
-removes the old entity from Home Assistant and the auto-installed dashboard
-switches its rows to match. A manually generated dashboard must be regenerated
+Every setting is published as **two** entities, so its id never changes:
+
+| | Entity | Exists |
+|---|---|---|
+| Read-only twin | `sensor.bms_1_maximum_charge_current` | always |
+| Control | `number.bms_1_maximum_charge_current_control` | only while its tier is on |
+
+The twin always shows the BMS's current value; the control is what you edit.
+Changing a tier needs an add-on restart, after which the control appears or
+disappears while the twin — and anything referencing it — is untouched. The
+auto-installed dashboard follows; a manually generated one must be regenerated
 with the matching `--basic-writes` / `--safety-writes` flags.
+
+Home Assistant cannot render a read-only `number` or `switch` (`command_topic`
+is required for both), which is why the control is a separate entity rather
+than the same one changing shape.
 
 Example rejected write (basic tier off):
 

@@ -18,7 +18,7 @@ entity's `name`:
 
 `sensor.bms_1_total_voltage`, `sensor.bms_1_state_of_charge`,
 `sensor.bms_1_cell_1_resistance`, `sensor.bms_1_maximum_charge_current`
-(`number.…` once its write tier is on).
+(plus `number.bms_1_maximum_charge_current_control` once its write tier is on).
 
 The generator computes the same slugs from the entity table (`SLUG` in
 `dashboard.py`), so generator and bridge cannot drift: renaming an entity moves
@@ -73,7 +73,8 @@ the core gauge).
 `enable_basic_writes` / `enable_safety_writes` are on; otherwise as read-only
 `sensor`/`binary_sensor`. The generator takes the tiers (`--basic-writes` /
 `--safety-writes`; the add-on passes its options) and renders each Controls row
-in the matching domain, so settings stay visible read-only when a tier is off.
+pointing at the `…_control` entity when a tier is on and at the permanent
+read-only twin otherwise, so a setting is always visible either way.
 On legacy installs the read-only variants use the `device_` id form, like
 `last_seen` (verified against a legacy install's BMS_1 entity dump, add-on
 2.1.2).

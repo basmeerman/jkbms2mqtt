@@ -51,6 +51,8 @@ from jkbms2mqtt.entities import (
     LIVE_SENSORS,
     PACKED_BIT_ENTITIES,
     WRITABLE_ENTITIES,
+    control_name,
+    control_object_id,
     expand_cell_entities,
     writable_component,
 )
@@ -95,12 +97,20 @@ def target_object_ids() -> dict[str, tuple[str, str]]:
     ):
         out[e.object_id] = (e.component.value, ha_slugify(e.description.rstrip(".")))
     for w in WRITABLE_ENTITIES:
-        component = writable_component(
-            is_bool=w.register.encoding is Encoding.BOOL32, writable=False
+        is_bool = w.register.encoding is Encoding.BOOL32
+        read_only = writable_component(is_bool=is_bool, writable=False)
+        out[w.object_id] = (read_only.value, ha_slugify(w.description.rstrip(".")))
+        # The control twin, published while the setting's write tier is on.
+        out[control_object_id(w.object_id)] = (
+            writable_component(is_bool=is_bool, writable=True).value,
+            ha_slugify(control_name(w.description.rstrip("."))),
         )
-        out[w.object_id] = (component.value, ha_slugify(w.description.rstrip(".")))
     for p in PACKED_BIT_ENTITIES:
         out[p.object_id] = ("binary_sensor", ha_slugify(p.bit.description.rstrip(".")))
+        out[control_object_id(p.object_id)] = (
+            "switch",
+            ha_slugify(control_name(p.bit.description.rstrip("."))),
+        )
     return out
 
 

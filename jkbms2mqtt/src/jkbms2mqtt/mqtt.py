@@ -35,6 +35,8 @@ from jkbms2mqtt.entities import (
     PackedBitEntity,
     ReadOnlyEntity,
     WritableEntity,
+    control_name,
+    control_object_id,
     expand_cell_entities,
     writable_component,
 )
@@ -230,18 +232,16 @@ def discovery_for_read_only(
 
 
 def discovery_for_writable(
-    entity: WritableEntity, bms_name: str, *, discovery_prefix: str, writable: bool
+    entity: WritableEntity, bms_name: str, *, discovery_prefix: str
 ) -> DiscoveryMessage:
-    """Discovery payload for a settable parameter.
+    """Read-only view of a settable parameter, published whatever the tier.
 
-    When ``writable`` is True the entity is published as a ``number``/``switch``
-    (HA shows controls). When False it is published as ``sensor``/
-    ``binary_sensor`` (status only, ``config`` category downgraded to
-    ``diagnostic``). Either way the same state topic carries the current BMS
-    value.
+    Always a ``sensor`` / ``binary_sensor``, so this entity never changes
+    component and its Home Assistant id is stable for the life of the install.
+    The editable twin is ``discovery_for_control``.
     """
     component = writable_component(
-        is_bool=entity.register.encoding is Encoding.BOOL32, writable=writable
+        is_bool=entity.register.encoding is Encoding.BOOL32, writable=False
     )
     payload = _base_payload(
         bms_name,
@@ -249,15 +249,52 @@ def discovery_for_writable(
         object_id=entity.object_id,
         name=entity.description,
         topic_suffix=entity.topic_suffix,
-        entity_category=(
-            entity.entity_category if writable else _read_only_category(entity.entity_category)
-        ),
+        entity_category=_read_only_category(entity.entity_category),
     )
-    if writable:
-        payload["command_topic"] = _command_topic(bms_name, entity.topic_suffix)
     if entity.register.unit:
         payload["unit_of_measurement"] = entity.register.unit
         # Match the precision the BMS encoding stores — see jk_settings.Encoding.
+        decimals = _decimals_for_encoding(entity.register.encoding)
+        if decimals is not None:
+            payload["suggested_display_precision"] = decimals
+    if component is Component.BINARY_SENSOR:
+        payload["payload_on"] = "ON"
+        payload["payload_off"] = "OFF"
+    return DiscoveryMessage(
+        topic=_discovery_topic(discovery_prefix, component, bms_name, entity.object_id),
+        payload=payload,
+    )
+
+
+def discovery_for_control(
+    entity: WritableEntity, bms_name: str, *, discovery_prefix: str
+) -> DiscoveryMessage:
+    """The editable twin of a setting: a ``number`` / ``switch``.
+
+    Published only while the parameter's write tier is on; when the tier goes
+    off this config is cleared and the entity disappears, leaving the
+    read-only twin — and its id — untouched.
+
+    Two entities rather than one changing component, because MQTT discovery
+    cannot express a read-only ``number`` or ``switch``: ``command_topic`` is
+    required for both (``MQTT_RW_SCHEMA``), and HA has no per-entity read-only
+    flag. Flipping the component instead would change the entity id on every
+    tier toggle, which silently breaks dashboards and automations — issue #23.
+    """
+    is_bool = entity.register.encoding is Encoding.BOOL32
+    component = writable_component(is_bool=is_bool, writable=True)
+    object_id = control_object_id(entity.object_id)
+    payload = _base_payload(
+        bms_name,
+        component=component,
+        object_id=object_id,
+        name=control_name(entity.description),
+        topic_suffix=entity.topic_suffix,
+        entity_category=entity.entity_category,
+    )
+    payload["command_topic"] = _command_topic(bms_name, entity.topic_suffix)
+    if entity.register.unit:
+        payload["unit_of_measurement"] = entity.register.unit
         decimals = _decimals_for_encoding(entity.register.encoding)
         if decimals is not None:
             payload["suggested_display_precision"] = decimals
@@ -266,41 +303,59 @@ def discovery_for_writable(
         payload["max"] = entity.register.max_value
         payload["step"] = entity.register.step
         payload["mode"] = "box"
-    if component in (Component.SWITCH, Component.BINARY_SENSOR):
+    else:
         payload["payload_on"] = "ON"
         payload["payload_off"] = "OFF"
-    if component is Component.SWITCH:
         payload["state_on"] = "ON"
         payload["state_off"] = "OFF"
     return DiscoveryMessage(
-        topic=_discovery_topic(discovery_prefix, component, bms_name, entity.object_id),
+        topic=_discovery_topic(discovery_prefix, component, bms_name, object_id),
         payload=payload,
     )
 
 
 def discovery_for_packed_bit(
-    entity: PackedBitEntity, bms_name: str, *, discovery_prefix: str, writable: bool
+    entity: PackedBitEntity, bms_name: str, *, discovery_prefix: str
 ) -> DiscoveryMessage:
-    """Discovery for a packed-bit boolean — switch when writable, binary sensor otherwise."""
-    component = writable_component(is_bool=True, writable=writable)
+    """Read-only view of a packed-bit toggle — always a ``binary_sensor``."""
     payload = _base_payload(
         bms_name,
-        component=component,
+        component=Component.BINARY_SENSOR,
         object_id=entity.object_id,
         name=entity.bit.description,
         topic_suffix=entity.topic_suffix,
-        entity_category=(
-            entity.entity_category if writable else _read_only_category(entity.entity_category)
-        ),
+        entity_category=_read_only_category(entity.entity_category),
     )
     payload["payload_on"] = "ON"
     payload["payload_off"] = "OFF"
-    if writable:
-        payload["command_topic"] = _command_topic(bms_name, entity.topic_suffix)
-        payload["state_on"] = "ON"
-        payload["state_off"] = "OFF"
     return DiscoveryMessage(
-        topic=_discovery_topic(discovery_prefix, component, bms_name, entity.object_id),
+        topic=_discovery_topic(
+            discovery_prefix, Component.BINARY_SENSOR, bms_name, entity.object_id
+        ),
+        payload=payload,
+    )
+
+
+def discovery_for_packed_bit_control(
+    entity: PackedBitEntity, bms_name: str, *, discovery_prefix: str
+) -> DiscoveryMessage:
+    """The editable twin of a packed-bit toggle: a ``switch``."""
+    object_id = control_object_id(entity.object_id)
+    payload = _base_payload(
+        bms_name,
+        component=Component.SWITCH,
+        object_id=object_id,
+        name=control_name(entity.bit.description),
+        topic_suffix=entity.topic_suffix,
+        entity_category=entity.entity_category,
+    )
+    payload["command_topic"] = _command_topic(bms_name, entity.topic_suffix)
+    payload["payload_on"] = "ON"
+    payload["payload_off"] = "OFF"
+    payload["state_on"] = "ON"
+    payload["state_off"] = "OFF"
+    return DiscoveryMessage(
+        topic=_discovery_topic(discovery_prefix, Component.SWITCH, bms_name, object_id),
         payload=payload,
     )
 
@@ -364,31 +419,36 @@ def build_discovery_messages(
         messages.append(discovery_for_read_only(e, bms_name, discovery_prefix=discovery_prefix))
 
     for w in WRITABLE_ENTITIES:
-        is_bool = w.register.encoding is Encoding.BOOL32
-        if not w.verified and not debug:  # pragma: no branch - no unverified writables today
-            for flag in (True, False):  # pragma: no cover
-                remove(writable_component(is_bool=is_bool, writable=flag), w.object_id)
-            continue  # pragma: no cover
-        writable = _tier_enabled(settings, w.register.tier)
-        messages.append(
-            discovery_for_writable(
-                w, bms_name, discovery_prefix=discovery_prefix, writable=writable
-            )
+        control = writable_component(
+            is_bool=w.register.encoding is Encoding.BOOL32, writable=True
         )
-        remove(writable_component(is_bool=is_bool, writable=not writable), w.object_id)
+        # Before 2.4 the control was published under the setting's own
+        # object_id, and the read-only view took that id when the tier was off.
+        # Clear that topic always, so the old entity cannot linger.
+        remove(control, w.object_id)
+        if not w.verified and not debug:  # pragma: no branch - no unverified writables today
+            remove(Component.SENSOR, w.object_id)  # pragma: no cover
+            remove(control, control_object_id(w.object_id))  # pragma: no cover
+            continue  # pragma: no cover
+        messages.append(discovery_for_writable(w, bms_name, discovery_prefix=discovery_prefix))
+        if _tier_enabled(settings, w.register.tier):
+            messages.append(discovery_for_control(w, bms_name, discovery_prefix=discovery_prefix))
+        else:
+            remove(control, control_object_id(w.object_id))
 
     for p in PACKED_BIT_ENTITIES:
+        remove(Component.SWITCH, p.object_id)
         if not p.verified and not debug:
-            for flag in (True, False):
-                remove(writable_component(is_bool=True, writable=flag), p.object_id)
+            remove(Component.BINARY_SENSOR, p.object_id)
+            remove(Component.SWITCH, control_object_id(p.object_id))
             continue
-        writable = _tier_enabled(settings, p.bit.tier)
-        messages.append(
-            discovery_for_packed_bit(
-                p, bms_name, discovery_prefix=discovery_prefix, writable=writable
+        messages.append(discovery_for_packed_bit(p, bms_name, discovery_prefix=discovery_prefix))
+        if _tier_enabled(settings, p.bit.tier):
+            messages.append(
+                discovery_for_packed_bit_control(p, bms_name, discovery_prefix=discovery_prefix)
             )
-        )
-        remove(writable_component(is_bool=True, writable=not writable), p.object_id)
+        else:
+            remove(Component.SWITCH, control_object_id(p.object_id))
 
     return messages
 
