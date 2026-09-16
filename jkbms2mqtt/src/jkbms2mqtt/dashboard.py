@@ -406,19 +406,16 @@ def overview_section(n: int) -> dict:
         "icon": "mdi:battery",
         "tap_action": {"action": "navigate", "navigation_path": f"bms-{n}"},
     }
-    soc_bar = {
-        "type": "custom:bar-card",
-        "entity": sensor(n, "soc_percentage"),
-        "name": "SoC",
-        "min": 0,
-        "max": 100,
-        "positions": {"icon": "off", "indicator": "off"},
-        "severity": [
-            {"color": "#fa4b54", "from": 0, "to": 20},
-            {"color": "#ffa600", "from": 20, "to": 50},
-            {"color": "#41cd52", "from": 50, "to": 100},
-        ],
-    }
+    # Core `gauge`, not the HACS bar-card: that repository was removed from
+    # HACS as unmaintained (issue #21), and the dashboard must render on a
+    # stock Home Assistant. With `needle: true` HA turns the legacy `severity`
+    # map into coloured bands, so the reading keeps its red / yellow / green
+    # meaning; the map is sorted by value, so "low is bad" is expressed by
+    # giving red the lowest threshold.
+    soc_gauge = _gauge(
+        sensor(n, "soc_percentage"), "SoC", 0, 100,
+        {"red": 0, "yellow": 20, "green": 50},
+    )
     gauges = {
         "type": "grid",
         "columns": 3,
@@ -444,7 +441,7 @@ def overview_section(n: int) -> dict:
     }
     tile = {
         "type": "vertical-stack",
-        "cards": [heading, _last_seen_card(n), soc_bar, gauges, stats],
+        "cards": [heading, _last_seen_card(n), soc_gauge, gauges, stats],
     }
     # Hide the tile only for a pack that has never reported. HA's visibility
     # engine does NOT support a `template` condition (only state/numeric_state/
