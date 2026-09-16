@@ -39,6 +39,22 @@ class Component(str, Enum):
     SWITCH = "switch"
 
 
+def writable_component(*, is_bool: bool, writable: bool) -> Component:
+    """The component a settable parameter is published as.
+
+    A write tier that is on makes the parameter a control (``number`` /
+    ``switch``); off publishes the same parameter read-only (``sensor`` /
+    ``binary_sensor``).
+
+    It lives here, next to ``Component``, so that tooling needing only the
+    entity table — the dashboard generator, ``scripts/rename_entities.py`` —
+    does not import the MQTT layer and, through it, pydantic.
+    """
+    if writable:
+        return Component.SWITCH if is_bool else Component.NUMBER
+    return Component.BINARY_SENSOR if is_bool else Component.SENSOR
+
+
 @dataclass(frozen=True, slots=True)
 class ReadOnlyEntity:
     """A telemetry entity. ``source_field`` is the attribute name on the decoded

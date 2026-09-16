@@ -13,11 +13,15 @@ API, matches every entity by the bridge's own ``unique_id``
 (``<bms_name>_device_<object_id>``) — not by its current id — and renames it to
 the id the current entity table would produce.
 
-Usage:
+Usage (from a checkout; the add-on package does not need to be installed —
+this script imports only the entity table, which is standard-library only):
+
+    pip install websockets
+    export PYTHONPATH="$PWD/jkbms2mqtt/src"
     export HA_URL="http://homeassistant.local:8123"
     export HA_TOKEN="<long-lived access token>"   # Profile -> Security
-    python scripts/rename_entities.py             # dry run: prints the plan
-    python scripts/rename_entities.py --apply     # performs the renames
+    python jkbms2mqtt/scripts/rename_entities.py          # dry run: the plan
+    python jkbms2mqtt/scripts/rename_entities.py --apply  # performs the renames
 
 Notes:
 - Dry run by default. Nothing changes without ``--apply``.
@@ -48,8 +52,8 @@ from jkbms2mqtt.entities import (
     PACKED_BIT_ENTITIES,
     WRITABLE_ENTITIES,
     expand_cell_entities,
+    writable_component,
 )
-from jkbms2mqtt.mqtt import writable_component
 from jkbms2mqtt.protocol.jk_modbus import MAX_CELLS
 from jkbms2mqtt.protocol.jk_settings import Encoding
 
