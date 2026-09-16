@@ -1,6 +1,6 @@
 ---
 name: jkbms2mqtt
-version: "2.2.2"
+version: "2.3.0"
 slug: jkbms2mqtt
 description: JK-BMS to MQTT bridge using the standard RS485 Modbus V1.0 / V1.1 protocol
 url: https://github.com/basmeerman/jkbms2mqtt
@@ -48,6 +48,7 @@ options:
   recording_enabled: false
   install_dashboard: true
   dashboard_cells: 16
+  clean_orphaned_discovery: false
 
 schema:
   transport: list(tcp_gateway|usb_serial)
@@ -72,3 +73,4 @@ schema:
   recording_enabled: bool
   install_dashboard: bool
   dashboard_cells: int(1,32)
+  clean_orphaned_discovery: bool

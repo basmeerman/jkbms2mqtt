@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import json
 import logging
+import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -110,6 +112,41 @@ def discovery_removal(
         topic=_discovery_topic(discovery_prefix, component, bms_name, object_id),
         payload=None,
     )
+
+
+def orphan_removals(topics: Iterable[str], *, settings: Settings) -> list[DiscoveryMessage]:
+    """Removals for retained discovery configs of packs this bridge no longer polls.
+
+    ``topics`` is what the broker replayed under
+    ``<discovery_prefix>/+/+/config``. A topic is cleared only when it is
+    unmistakably ours — our discovery prefix, a known component, and a device
+    id shaped ``<bms_name_prefix>_<slave id>_device_<object_id>`` — and its
+    slave id is **not** in ``bms_ids``. Everything else is left alone: other
+    integrations, another jkbms2mqtt instance with a different prefix, and the
+    packs we still poll (whose own removals ``build_discovery_messages``
+    already handles).
+
+    Pure on purpose. What gets deleted is decided here, under test; the
+    subscribe / collect side is glue in ``app.run``.
+    """
+    pattern = re.compile(
+        rf"^{re.escape(settings.discovery_prefix)}/(?P<component>[^/]+)/"
+        rf"{re.escape(settings.bms_name_prefix)}_(?P<slave>\d+)_device_[^/]+/config$"
+    )
+    components = {c.value for c in Component}
+    configured = set(settings.bms_ids)
+
+    out: list[DiscoveryMessage] = []
+    for topic in topics:
+        match = pattern.match(topic)
+        if match is None or match["component"] not in components:
+            continue
+        if int(match["slave"]) in configured:
+            continue
+        # Clear the topic exactly as the broker reported it, rather than
+        # rebuilding it from an object_id we may no longer know.
+        out.append(DiscoveryMessage(topic=topic, payload=None))
+    return out
 
 
 def _read_only_category(entity_category: str | None) -> str | None:

@@ -22,6 +22,7 @@ from jkbms2mqtt.mqtt import (
     discovery_for_packed_bit,
     discovery_for_read_only,
     discovery_for_writable,
+    orphan_removals,
     render,
     state_message_last_seen,
     state_messages_from_live,
@@ -487,6 +488,80 @@ class TestDiscoveryPayloads:
         topic, payload_bytes = render(msg)
         assert topic == msg.topic
         assert json.loads(payload_bytes) == msg.payload
+
+
+class TestOrphanRemovals:
+    """Clearing retained configs of packs the bridge no longer polls (issue #25)."""
+
+    def _topic(self, component: str, bms: str, object_id: str, prefix: str = "homeassistant") -> str:
+        return f"{prefix}/{component}/{bms}_device_{object_id}/config"
+
+    def test_clears_a_pack_that_is_no_longer_configured(self) -> None:
+        s = _settings(bms_ids=[1, 2])
+        topics = [
+            self._topic("sensor", "BMS_1", "total_voltage"),
+            self._topic("sensor", "BMS_7", "total_voltage"),
+            self._topic("number", "BMS_7", "max_charge_current"),
+        ]
+        removals = orphan_removals(topics, settings=s)
+        assert [m.topic for m in removals] == topics[1:]
+        assert all(m.payload is None for m in removals)
+
+    def test_leaves_configured_packs_alone(self) -> None:
+        s = _settings(bms_ids=[1, 2, 3])
+        topics = [self._topic("sensor", f"BMS_{n}", "total_voltage") for n in (1, 2, 3)]
+        assert orphan_removals(topics, settings=s) == []
+
+    def test_ignores_another_integration(self) -> None:
+        s = _settings(bms_ids=[1])
+        topics = [
+            "homeassistant/sensor/zigbee_thermostat/config",
+            "homeassistant/light/kitchen_lamp/config",
+            "zigbee2mqtt/bridge/config",
+        ]
+        assert orphan_removals(topics, settings=s) == []
+
+    def test_ignores_another_bridge_under_a_different_prefix(self) -> None:
+        """A second jkbms2mqtt with its own discovery prefix owns its topics."""
+        s = _settings(bms_ids=[1])
+        topics = [self._topic("sensor", "BMS_7", "total_voltage", prefix="ha-other")]
+        assert orphan_removals(topics, settings=s) == []
+
+    def test_respects_the_bms_name_prefix(self) -> None:
+        s = _settings(bms_ids=[1], bms_name_prefix="PACK")
+        topics = [
+            self._topic("sensor", "PACK_9", "total_voltage"),
+            self._topic("sensor", "BMS_9", "total_voltage"),  # another instance
+        ]
+        assert [m.topic for m in orphan_removals(topics, settings=s)] == [topics[0]]
+
+    def test_ignores_an_unknown_component(self) -> None:
+        s = _settings(bms_ids=[1])
+        topics = [self._topic("climate", "BMS_7", "total_voltage")]
+        assert orphan_removals(topics, settings=s) == []
+
+    def test_ignores_a_malformed_device_id(self) -> None:
+        s = _settings(bms_ids=[1])
+        topics = [
+            "homeassistant/sensor/BMS_x_device_total_voltage/config",  # non-numeric id
+            "homeassistant/sensor/BMS_7_total_voltage/config",  # no _device_
+            "homeassistant/sensor/BMS_7_device_/config",  # empty object_id
+            "homeassistant/sensor/BMS_7_device_total_voltage/state",  # not a config topic
+        ]
+        assert orphan_removals(topics, settings=s) == []
+
+    def test_empty_broker(self) -> None:
+        assert orphan_removals([], settings=_settings(bms_ids=[1])) == []
+
+    def test_removals_render_as_empty_payloads(self) -> None:
+        s = _settings(bms_ids=[1])
+        (removal,) = orphan_removals(
+            [self._topic("binary_sensor", "BMS_4", "charging_switch")], settings=s
+        )
+        assert render(removal) == (
+            "homeassistant/binary_sensor/BMS_4_device_charging_switch/config",
+            b"",
+        )
 
 
 # -- State messages -------------------------------------------------------------------

@@ -19,7 +19,7 @@ from jkbms2mqtt import dashboard
 from jkbms2mqtt.bms_runner import BmsRunner
 from jkbms2mqtt.config import Settings, load_settings
 from jkbms2mqtt.entities import writable_by_command_topic_suffix
-from jkbms2mqtt.mqtt import BRIDGE_AVAILABILITY_TOPIC
+from jkbms2mqtt.mqtt import BRIDGE_AVAILABILITY_TOPIC, orphan_removals, render
 from jkbms2mqtt.transport import build_client, connect_with_backoff
 from jkbms2mqtt.write_executor import WriteExecutor, WriteRequest
 
@@ -49,6 +49,52 @@ def configure_logging(settings: Settings) -> None:
     if settings.recording_enabled:
         # Route pymodbus' transaction-level hex dumps to our log pipeline.
         logging.getLogger("pymodbus").setLevel(logging.DEBUG)
+
+
+# How long to keep reading retained discovery configs. MQTT has no
+# end-of-retained marker, so this is a settle window: collection stops once
+# nothing new has arrived for this long.
+DISCOVERY_SETTLE_S = 2.0
+
+
+async def _clean_orphaned_discovery(  # pragma: no cover - MQTT glue
+    mqtt: MqttClient, settings: Settings
+) -> None:
+    """Clear retained discovery configs of packs no longer in ``bms_ids``.
+
+    Called before the command-topic subscriptions on purpose: ``mqtt.messages``
+    is one shared queue, so draining it here while ``/set`` topics were already
+    subscribed could swallow a user's write. Until we subscribe to them, no
+    command can arrive.
+
+    Which topics get cleared is decided by ``mqtt.orphan_removals`` — pure and
+    unit-tested. This function only does the broker conversation.
+    """
+    wildcard = f"{settings.discovery_prefix}/+/+/config"
+    await mqtt.subscribe(wildcard, qos=0)
+    seen: list[str] = []
+    messages = aiter(mqtt.messages)
+    try:
+        while True:
+            message = await asyncio.wait_for(anext(messages), DISCOVERY_SETTLE_S)
+            # An already-cleared config replays as an empty payload; skip it.
+            if message.retain and message.payload:
+                seen.append(str(message.topic))
+    except TimeoutError:
+        pass
+    finally:
+        await mqtt.unsubscribe(wildcard)
+
+    removals = orphan_removals(seen, settings=settings)
+    for removal in removals:
+        topic, payload = render(removal)
+        await mqtt.publish(topic, payload=payload, qos=1, retain=True)
+        logger.info("cleared orphaned discovery config: %s", topic)
+    logger.info(
+        "orphaned-discovery cleanup: %d retained config(s) on the broker, %d cleared",
+        len(seen),
+        len(removals),
+    )
 
 
 async def run(settings: Settings) -> None:  # pragma: no cover - top-level glue
@@ -92,6 +138,12 @@ async def run(settings: Settings) -> None:  # pragma: no cover - top-level glue
         executor = WriteExecutor(
             client=client, settings=settings, publish=publish_write_output
         )
+
+        # Opt-in: clear retained discovery configs of packs that are no longer
+        # configured. Must happen before the /set subscriptions below — see the
+        # helper's docstring.
+        if settings.clean_orphaned_discovery:
+            await _clean_orphaned_discovery(mqtt, settings)
 
         # Always subscribe to every /set topic. The write executor enforces tier
         # gating and publishes a structured error to <bms>/error if a user posts
