@@ -63,6 +63,7 @@ Two supported transports between the bus and this add-on:
 | `recording_enabled` | `false` | When on, every Modbus transaction is logged to the add-on log at DEBUG (no separate file). |
 | `install_dashboard` | `true` | Auto-write a ready-made Lovelace dashboard + bank-aggregates package into `<config>/jkbms2mqtt/` on startup. See [Dashboard](#dashboard) below. |
 | `dashboard_cells` | `16` | Cells per pack for that generated dashboard (homogeneous bank). Leave at your largest pack; unused cell rows just show *Unavailable*. |
+| `clean_orphaned_discovery` | `false` | On startup, clear retained discovery configs of packs no longer in `bms_ids`. See [Removing a pack](#removing-a-pack). |
 
 ## Verifying it works
 
@@ -129,6 +130,33 @@ as editable controls for a tier that is on, as read-only rows otherwise.
 > [MIGRATION.md](https://github.com/basmeerman/jkbms2mqtt/blob/main/MIGRATION.md#entity-ids).
 
 To opt out entirely, set `install_dashboard: false`; nothing is written.
+
+## Removing a pack
+
+Home Assistant learns about entities from *retained* MQTT discovery messages.
+Those survive on the broker until someone clears them, so a pack you remove
+from `bms_ids` — decommissioned, or its DIP-switch address changed — leaves
+about a hundred dead entities behind. They show as unavailable and come back
+after every Home Assistant restart. The same happens to every pack if you
+change `bms_name_prefix`.
+
+Set `clean_orphaned_discovery: true` and restart the add-on. On startup it
+reads the retained discovery configs on the broker and clears the ones that
+belong to this bridge (its `discovery_prefix` and `bms_name_prefix`) for slave
+addresses that are no longer in `bms_ids`. Every cleared topic is logged. The
+packs you still poll are untouched.
+
+> **Why it is off by default.** Two bridges can share one broker. A pack this
+> instance does not poll may legitimately belong to the other one, and clearing
+> its configs would delete that instance's entities from Home Assistant. Turn
+> the option on deliberately, check the log, and turn it off again if you like —
+> the cleanup only needs to run once.
+
+Prefer to do it by hand? Publish an empty retained message to each stale topic:
+
+```sh
+mosquitto_pub -r -n -t 'homeassistant/sensor/BMS_7_device_total_voltage/config'
+```
 
 ## Writes
 

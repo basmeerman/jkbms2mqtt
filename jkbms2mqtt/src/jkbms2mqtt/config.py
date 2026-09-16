@@ -84,6 +84,13 @@ class Settings(BaseModel):
     # banks: leave at the max; unused cell rows simply show Unavailable.
     dashboard_cells: Annotated[int, Field(ge=1, le=32)] = 16
 
+    # On startup, clear retained discovery configs of packs that are no longer
+    # in bms_ids (a decommissioned pack, or a changed bms_name_prefix), which
+    # HA would otherwise keep forever as dead entities. Off by default: two
+    # bridges can share one broker, and a pack this instance does not poll may
+    # legitimately belong to the other one. See DOCS.md.
+    clean_orphaned_discovery: bool = False
+
     @field_validator("bms_ids", mode="before")
     @classmethod
     def _parse_bms_ids(cls, v: object) -> object:
