@@ -34,6 +34,7 @@ from jkbms2mqtt.entities import (
     ReadOnlyEntity,
     WritableEntity,
     expand_cell_entities,
+    writable_component,
 )
 from jkbms2mqtt.protocol.jk_modbus import MAX_CELLS, JkRealtime, JkStaticInfo
 from jkbms2mqtt.protocol.jk_settings import (
@@ -109,12 +110,6 @@ def discovery_removal(
         topic=_discovery_topic(discovery_prefix, component, bms_name, object_id),
         payload=None,
     )
-
-
-def writable_component(*, is_bool: bool, writable: bool) -> Component:
-    if writable:
-        return Component.SWITCH if is_bool else Component.NUMBER
-    return Component.BINARY_SENSOR if is_bool else Component.SENSOR
 
 
 def _read_only_category(entity_category: str | None) -> str | None:

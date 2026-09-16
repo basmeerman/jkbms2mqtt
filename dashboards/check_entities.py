@@ -39,8 +39,8 @@ from jkbms2mqtt.entities import (
     LIVE_SENSORS,
     WRITABLE_ENTITIES,
     expand_cell_entities,
+    writable_component,
 )
-from jkbms2mqtt.mqtt import writable_component
 from jkbms2mqtt.protocol.jk_settings import Encoding
 
 HERE = Path(__file__).parent
