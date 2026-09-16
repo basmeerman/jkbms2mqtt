@@ -50,19 +50,21 @@ rows otherwise) and **History** graphs:
   block shows it in the sidebar — self-updating, no re-paste. See
   [DOCS.md → Dashboard](../jkbms2mqtt/DOCS.md#dashboard). You still install the
   HACS cards (below).
-- **Manual generate + paste (this folder).** Use the generator directly — for
-  existing installs whose entity ids are the "sticky" legacy `…_total_pack_voltage`
-  form, or if you'd rather not let the add-on write to your config dir. Steps
-  1–4 below.
+- **Manual generate + paste (this folder).** Use the generator directly if you'd
+  rather not let the add-on write to your config dir, or you want to tweak the
+  YAML. Steps 1–4 below.
 
-### Entity-naming modes
+### Entity ids
 
-A *fresh* install publishes `sensor.bms_<n>_device_<object_id>` ids
-(`--naming device`). Installs predating the add-on's `object_id` discovery kept
-the legacy `sensor.bms_<n>_<slug>` ids — HA never auto-renames them, so they're
-"sticky" (`--naming legacy`, the CLI default). Check one entity id under
-**Settings → Devices → BMS 1** to see which you have. The add-on auto-install
-always uses `device`.
+Home Assistant builds each id from the device name plus the entity name, so
+`BMS_1` + "Total voltage" gives `sensor.bms_1_total_voltage`. The generator
+derives the same ids from the bridge's entity table, so both always agree.
+
+Installs from before 2.2.0 keep the ids they registered back then
+(`sensor.bms_1_total_pack_voltage`, or `sensor.bms_1_device_total_voltage`),
+because HA never renames an existing entity. Check one id under **Settings →
+Devices → BMS 1**; if it doesn't match, run `scripts/rename_entities.py` once
+(see [MIGRATION.md](../MIGRATION.md#entity-ids)).
 
 ## 1. Generate the YAML
 
@@ -116,13 +118,13 @@ History uses the built-in `history-graph` card (no HACS needed). Gauges,
 3. Replace the contents with `out/jkbms2mqtt-dashboard.yaml`. Save.
 
 Overview tiles only render for packs that have reported at least once
-(`sensor.bms_<n>_device_last_seen` is neither `unknown` nor `unavailable`), so
+(`sensor.bms_<n>_last_seen` is neither `unknown` nor `unavailable`), so
 unused ids stay hidden while a pack that goes silent stays visible and greys
 out. Tap a pack's heading to open its detail subview, whose **Live** section
 shows the same freshness row plus the exact time of the last successful poll.
 
-`last_seen` is a newer entity, so it gets the `…_device_last_seen` id on legacy
-installs too — both naming modes reference it that way.
+All ids come from the entity names, so they match a 2.2.0-or-newer install
+exactly; an older install migrates with `scripts/rename_entities.py`.
 
 ## 4. Install the aggregates package (optional but recommended)
 
@@ -149,11 +151,9 @@ Copy `jkbms_aggregates.yaml` into `<config>/packages/` and restart HA.
   options on every restart; after changing a tier, **re-generate a manual
   dashboard** with the matching `--basic-writes` / `--safety-writes` flags and
   re-paste. ⚠️ Safety thresholds can damage cells if set wrong.
-- **Legacy read-only setting ids.** On legacy installs the read-only variants
-  are slugged from the setting's description
-  (`sensor.bms_1_cell_voltage_below_which_the_bms_enters_smart_sleep`), while
-  the controls keep the register name (`number.bms_1_smart_sleep_voltage`).
-  The generator handles both; run `out/verify-entities.jinja` to confirm.
+- **Older installs need one migration.** Entity ids registered before 2.2.0
+  don't match this dashboard; `scripts/rename_entities.py` migrates them, and
+  `out/verify-entities.jinja` confirms the result.
 - **Re-generate after changing `bms_ids` or cell counts** and re-paste.
 - **Five temperature probes** are shown (`probe_1..5`); unused probes show
   Unavailable. Unverified fields (`heating`, packed-bit toggles) are excluded.
@@ -166,7 +166,7 @@ every push/PR:
 1. **Lint** `generate.py` + `check_entities.py` with the repo's ruff config.
 2. **Sync** — regenerates the YAML and fails if the committed `out/` /
    `packages/` differ (someone edited the generator but didn't regenerate).
-3. **Entity drift** — `check_entities.py --naming {legacy,device}` reconciles the
+3. **Entity drift** — `check_entities.py` reconciles the
    dashboard's references against the bridge's own entity table
    (`jkbms2mqtt.entities`) at the `(domain, object_id)` level, in **both** naming
    modes, and fails if the bridge adds/removes/renames an entity the dashboard

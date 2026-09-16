@@ -86,10 +86,12 @@ A **JK-BMS** dashboard appears in the sidebar — bank summary + a tile per pack
 each linking to a detail page. Change `bms_ids` later and restart the add-on;
 the dashboard regenerates with no re-paste.
 
-> **Already running an older build?** If your entity ids look like
-> `sensor.bms_1_total_pack_voltage` (rather than `…_device_…`), see the
-> [dashboards guide](dashboards/README.md#two-ways-to-install) for the
-> matching dashboard.
+> **Upgrading from a build before 2.2.0?** Home Assistant never renames an
+> entity it has already registered, so your ids may still read
+> `sensor.bms_1_total_pack_voltage` or `sensor.bms_1_device_total_voltage`
+> while the dashboard now expects `sensor.bms_1_total_voltage`. Run
+> [`scripts/rename_entities.py`](jkbms2mqtt/scripts/rename_entities.py) once to
+> migrate them — see [MIGRATION.md](MIGRATION.md#entity-ids).
 
 That's it. To make settings editable, enable `enable_basic_writes` /
 `enable_safety_writes` (⚠️ safety thresholds can damage cells — see the

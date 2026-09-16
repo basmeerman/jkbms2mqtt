@@ -159,7 +159,7 @@ class TestCellEntityFields:
         assert volt.state_class == "measurement"
         assert volt.unit_of_measurement == "V"
         assert volt.decimals == 3
-        assert volt.description == "Cell 2 voltage."
+        assert volt.description == "Cell 2 voltage"
         assert volt.entity_category is None  # per-cell voltage is primary
 
     def test_resistance_entity_all_fields(self) -> None:
@@ -171,7 +171,7 @@ class TestCellEntityFields:
         assert ohm.state_class == "measurement"
         assert ohm.unit_of_measurement == "Ω"
         assert ohm.decimals == 3
-        assert ohm.description == "Cell 2 internal resistance."
+        assert ohm.description == "Cell 2 resistance"
         assert ohm.entity_category == "diagnostic"
 
     def test_source_field_index_is_zero_based(self) -> None:

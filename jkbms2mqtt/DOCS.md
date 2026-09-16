@@ -121,13 +121,12 @@ A **JK-BMS** dashboard then appears in the sidebar and *self-updates* — change
 re-paste. Its **Controls** section always shows every setting's current value:
 as editable controls for a tier that is on, as read-only rows otherwise.
 
-> **Existing installs (entity ids like `sensor.bms_1_total_pack_voltage`):** the
-> auto-installed dashboard targets the ids a *fresh* install publishes
-> (`sensor.bms_1_device_total_voltage`). If your HA already shows the older
-> name-slug ids (they're "sticky" and never auto-rename), set
-> `install_dashboard: false` and use the manual generator with `--naming legacy`
-> from the [`dashboards/`](https://github.com/basmeerman/jkbms2mqtt/tree/main/dashboards)
-> folder instead.
+> **Upgrading from a build before 2.2.0:** Home Assistant never renames an
+> entity it has already registered, so an older install keeps ids such as
+> `sensor.bms_1_total_pack_voltage` or `sensor.bms_1_device_total_voltage`,
+> while this dashboard expects `sensor.bms_1_total_voltage`. Run
+> `scripts/rename_entities.py` once to migrate — see
+> [MIGRATION.md](https://github.com/basmeerman/jkbms2mqtt/blob/main/MIGRATION.md#entity-ids).
 
 To opt out entirely, set `install_dashboard: false`; nothing is written.
 

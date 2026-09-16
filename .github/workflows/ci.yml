@@ -77,8 +77,7 @@ jobs:
           git diff --exit-code dashboards/out dashboards/packages
       - name: Assert dashboard entities match the bridge's entity table
         run: |
-          python dashboards/check_entities.py --naming legacy
-          python dashboards/check_entities.py --naming device
+          python dashboards/check_entities.py
 
   docker-build:
     # Validate the supervisor's local-build path on every PR by building the

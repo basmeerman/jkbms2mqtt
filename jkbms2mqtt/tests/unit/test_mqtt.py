@@ -520,18 +520,27 @@ class TestFreshness:
         assert "entity_category" not in m.payload
         assert "suggested_display_precision" not in m.payload
 
-    def test_default_entity_id_is_domain_qualified_and_lowercase(self) -> None:
+    def test_no_entity_id_is_suggested(self) -> None:
+        """HA derives the entity id from device name + entity name; the bridge
+        must not override it (``object_id`` was removed in HA 2026.4, and
+        ``default_entity_id`` is an override we deliberately don't send)."""
+        s = _settings(
+            enable_basic_writes=True, enable_safety_writes=True, debug_unverified_fields=True
+        )
+        msgs = build_discovery_messages(settings=s, bms_name="BMS_1", cell_count=16)
+        for m in msgs:
+            if m.payload is None:
+                continue
+            assert "object_id" not in m.payload, m.topic
+            assert "default_entity_id" not in m.payload, m.topic
+
+    def test_unique_id_still_identifies_the_entity(self) -> None:
+        """The unique_id keeps its shape: it is how HA recognises an entity
+        across restarts and renames, and how the rename script matches them."""
         e = next(x for x in LIVE_SENSORS if x.object_id == "total_voltage")
         msg = discovery_for_read_only(e, "BMS_1", discovery_prefix="homeassistant")
-        assert msg.payload["default_entity_id"] == "sensor.bms_1_device_total_voltage"
-        assert msg.payload["object_id"] == "BMS_1_device_total_voltage"
-
-    def test_default_entity_id_follows_tier_downgrade(self) -> None:
-        w = next(x for x in WRITABLE_ENTITIES if x.object_id == "max_charge_current")
-        on = discovery_for_writable(w, "BMS_1", discovery_prefix="homeassistant", writable=True)
-        off = discovery_for_writable(w, "BMS_1", discovery_prefix="homeassistant", writable=False)
-        assert on.payload["default_entity_id"] == "number.bms_1_device_max_charge_current"
-        assert off.payload["default_entity_id"] == "sensor.bms_1_device_max_charge_current"
+        assert msg.payload["unique_id"] == "BMS_1_device_total_voltage"
+        assert msg.payload["name"] == "Total voltage"
 
     def test_state_message_last_seen_iso_with_timezone(self) -> None:
         when = datetime(2026, 9, 15, 10, 21, 7, 123456, tzinfo=UTC)

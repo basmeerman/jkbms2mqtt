@@ -133,7 +133,7 @@ LIVE_SENSORS: Final[tuple[ReadOnlyEntity, ...]] = (
         state_class="measurement",
         unit_of_measurement="V",
         decimals=3,
-        description="Total pack voltage.",
+        description="Total voltage",
     ),
     ReadOnlyEntity(
         object_id="total_current",
@@ -144,7 +144,7 @@ LIVE_SENSORS: Final[tuple[ReadOnlyEntity, ...]] = (
         state_class="measurement",
         unit_of_measurement="A",
         decimals=3,
-        description="Total pack current (negative = discharge).",
+        description="Total current",
     ),
     ReadOnlyEntity(
         object_id="total_power",
@@ -155,7 +155,7 @@ LIVE_SENSORS: Final[tuple[ReadOnlyEntity, ...]] = (
         state_class="measurement",
         unit_of_measurement="W",
         decimals=1,
-        description="Total pack power (signed).",
+        description="Total power",
     ),
     ReadOnlyEntity(
         object_id="soc_percentage",
@@ -166,7 +166,7 @@ LIVE_SENSORS: Final[tuple[ReadOnlyEntity, ...]] = (
         state_class="measurement",
         unit_of_measurement="%",
         decimals=0,
-        description="State of charge.",
+        description="State of charge",
     ),
     ReadOnlyEntity(
         object_id="soh_percentage",
@@ -177,7 +177,7 @@ LIVE_SENSORS: Final[tuple[ReadOnlyEntity, ...]] = (
         state_class="measurement",
         unit_of_measurement="%",
         decimals=0,
-        description="State of health.",
+        description="State of health",
         entity_category="diagnostic",
     ),
     ReadOnlyEntity(
@@ -189,7 +189,7 @@ LIVE_SENSORS: Final[tuple[ReadOnlyEntity, ...]] = (
         state_class="measurement",
         unit_of_measurement="Ah",
         decimals=2,
-        description="Remaining battery capacity.",
+        description="Remaining capacity",
     ),
     ReadOnlyEntity(
         object_id="nominal_capacity_ah",
@@ -200,7 +200,7 @@ LIVE_SENSORS: Final[tuple[ReadOnlyEntity, ...]] = (
         state_class="measurement",
         unit_of_measurement="Ah",
         decimals=2,
-        description="Nominal pack capacity.",
+        description="Nominal capacity",
     ),
     ReadOnlyEntity(
         object_id="cycle_count",
@@ -211,7 +211,7 @@ LIVE_SENSORS: Final[tuple[ReadOnlyEntity, ...]] = (
         state_class="total_increasing",
         unit_of_measurement=None,
         decimals=0,
-        description="Charge cycle count.",
+        description="Cycle count",
         entity_category="diagnostic",
     ),
     ReadOnlyEntity(
@@ -223,7 +223,7 @@ LIVE_SENSORS: Final[tuple[ReadOnlyEntity, ...]] = (
         state_class="measurement",
         unit_of_measurement="A",
         decimals=3,
-        description="Cell-balance current.",
+        description="Balance current",
     ),
     ReadOnlyEntity(
         object_id="mos_temp",
@@ -234,7 +234,7 @@ LIVE_SENSORS: Final[tuple[ReadOnlyEntity, ...]] = (
         state_class="measurement",
         unit_of_measurement="°C",
         decimals=1,
-        description="MOSFET temperature.",
+        description="MOSFET temperature",
     ),
     ReadOnlyEntity(
         object_id="probe_1_temp",
@@ -245,7 +245,7 @@ LIVE_SENSORS: Final[tuple[ReadOnlyEntity, ...]] = (
         state_class="measurement",
         unit_of_measurement="°C",
         decimals=1,
-        description="Probe 1 temperature.",
+        description="Probe 1 temperature",
     ),
     ReadOnlyEntity(
         object_id="probe_2_temp",
@@ -256,7 +256,7 @@ LIVE_SENSORS: Final[tuple[ReadOnlyEntity, ...]] = (
         state_class="measurement",
         unit_of_measurement="°C",
         decimals=1,
-        description="Probe 2 temperature.",
+        description="Probe 2 temperature",
     ),
     ReadOnlyEntity(
         object_id="probe_3_temp",
@@ -267,7 +267,7 @@ LIVE_SENSORS: Final[tuple[ReadOnlyEntity, ...]] = (
         state_class="measurement",
         unit_of_measurement="°C",
         decimals=1,
-        description="Probe 3 temperature.",
+        description="Probe 3 temperature",
     ),
     ReadOnlyEntity(
         object_id="probe_4_temp",
@@ -278,7 +278,7 @@ LIVE_SENSORS: Final[tuple[ReadOnlyEntity, ...]] = (
         state_class="measurement",
         unit_of_measurement="°C",
         decimals=1,
-        description="Probe 4 temperature.",
+        description="Probe 4 temperature",
     ),
     ReadOnlyEntity(
         object_id="probe_5_temp",
@@ -289,7 +289,7 @@ LIVE_SENSORS: Final[tuple[ReadOnlyEntity, ...]] = (
         state_class="measurement",
         unit_of_measurement="°C",
         decimals=1,
-        description="Probe 5 temperature.",
+        description="Probe 5 temperature",
     ),
     ReadOnlyEntity(
         object_id="total_runtime",
@@ -300,7 +300,7 @@ LIVE_SENSORS: Final[tuple[ReadOnlyEntity, ...]] = (
         state_class="total_increasing",
         unit_of_measurement="s",
         decimals=0,
-        description="Total runtime since BMS power-on.",
+        description="Runtime",
         entity_category="diagnostic",
     ),
     ReadOnlyEntity(
@@ -312,7 +312,7 @@ LIVE_SENSORS: Final[tuple[ReadOnlyEntity, ...]] = (
         state_class="total_increasing",
         unit_of_measurement="Ah",
         decimals=2,
-        description="Lifetime accumulated charge throughput.",
+        description="Cycle capacity",
         entity_category="diagnostic",
     ),
     ReadOnlyEntity(
@@ -324,7 +324,7 @@ LIVE_SENSORS: Final[tuple[ReadOnlyEntity, ...]] = (
         state_class="measurement",
         unit_of_measurement="A",
         decimals=3,
-        description="Current drawn by the heating element (PB-series only).",
+        description="Heating current",
         verified=False,
         entity_category="diagnostic",
     ),
@@ -339,7 +339,7 @@ LIVE_SENSORS: Final[tuple[ReadOnlyEntity, ...]] = (
         state_class=None,
         unit_of_measurement=None,
         decimals=0,
-        description="Raw alarm bitmap (32-bit).",
+        description="Alarm bits",
         entity_category="diagnostic",
     ),
     ReadOnlyEntity(
@@ -351,7 +351,7 @@ LIVE_SENSORS: Final[tuple[ReadOnlyEntity, ...]] = (
         state_class=None,
         unit_of_measurement=None,
         decimals=None,
-        description="Comma-separated list of active alarms.",
+        description="Alarms",
     ),
 )
 
@@ -368,7 +368,7 @@ LIVE_BINARY_SENSORS: Final[tuple[ReadOnlyEntity, ...]] = (
         state_class=None,
         unit_of_measurement=None,
         decimals=None,
-        description="Charge MOSFET state (reported).",
+        description="Charge MOSFET state",
     ),
     ReadOnlyEntity(
         object_id="switch_discharge",
@@ -379,7 +379,7 @@ LIVE_BINARY_SENSORS: Final[tuple[ReadOnlyEntity, ...]] = (
         state_class=None,
         unit_of_measurement=None,
         decimals=None,
-        description="Discharge MOSFET state (reported).",
+        description="Discharge MOSFET state",
     ),
     ReadOnlyEntity(
         object_id="switch_balance",
@@ -390,7 +390,7 @@ LIVE_BINARY_SENSORS: Final[tuple[ReadOnlyEntity, ...]] = (
         state_class=None,
         unit_of_measurement=None,
         decimals=None,
-        description="Balance state (reported).",
+        description="Balancing state",
     ),
     ReadOnlyEntity(
         object_id="heating",
@@ -401,7 +401,7 @@ LIVE_BINARY_SENSORS: Final[tuple[ReadOnlyEntity, ...]] = (
         state_class=None,
         unit_of_measurement=None,
         decimals=None,
-        description="Heating-element state (PB-series only).",
+        description="Heating",
         verified=False,
     ),
 )
@@ -419,7 +419,7 @@ CELL_STATS_SENSORS: Final[tuple[ReadOnlyEntity, ...]] = (
         state_class="measurement",
         unit_of_measurement="V",
         decimals=3,
-        description="Average cell voltage (populated cells only).",
+        description="Average cell voltage",
     ),
     ReadOnlyEntity(
         object_id="cell_voltage_delta",
@@ -430,7 +430,7 @@ CELL_STATS_SENSORS: Final[tuple[ReadOnlyEntity, ...]] = (
         state_class="measurement",
         unit_of_measurement="V",
         decimals=3,
-        description="Cell voltage delta (max − min).",
+        description="Cell voltage delta",
     ),
     ReadOnlyEntity(
         object_id="cell_voltage_max_value",
@@ -441,7 +441,7 @@ CELL_STATS_SENSORS: Final[tuple[ReadOnlyEntity, ...]] = (
         state_class="measurement",
         unit_of_measurement="V",
         decimals=3,
-        description="Highest cell voltage.",
+        description="Maximum cell voltage",
     ),
     ReadOnlyEntity(
         object_id="cell_voltage_min_value",
@@ -452,7 +452,7 @@ CELL_STATS_SENSORS: Final[tuple[ReadOnlyEntity, ...]] = (
         state_class="measurement",
         unit_of_measurement="V",
         decimals=3,
-        description="Lowest cell voltage.",
+        description="Minimum cell voltage",
     ),
     ReadOnlyEntity(
         object_id="cell_voltage_max_number",
@@ -463,7 +463,7 @@ CELL_STATS_SENSORS: Final[tuple[ReadOnlyEntity, ...]] = (
         state_class="measurement",
         unit_of_measurement=None,
         decimals=0,
-        description="1-indexed cell number with the highest voltage.",
+        description="Highest cell number",
     ),
     ReadOnlyEntity(
         object_id="cell_voltage_min_number",
@@ -474,7 +474,7 @@ CELL_STATS_SENSORS: Final[tuple[ReadOnlyEntity, ...]] = (
         state_class="measurement",
         unit_of_measurement=None,
         decimals=0,
-        description="1-indexed cell number with the lowest voltage.",
+        description="Lowest cell number",
     ),
     ReadOnlyEntity(
         # Renamed from `cell_count` to avoid clashing with the writable
@@ -487,7 +487,7 @@ CELL_STATS_SENSORS: Final[tuple[ReadOnlyEntity, ...]] = (
         state_class="measurement",
         unit_of_measurement=None,
         decimals=0,
-        description="Number of cells the BMS reports as present.",
+        description="Cells present",
         entity_category="diagnostic",
     ),
 )
@@ -510,7 +510,7 @@ def expand_cell_entities(cell_count: int) -> tuple[ReadOnlyEntity, ...]:
                 state_class="measurement",
                 unit_of_measurement="V",
                 decimals=3,
-                description=f"Cell {n} voltage.",
+                description=f"Cell {n} voltage",
             )
         )
     for n in range(1, cell_count + 1):
@@ -524,7 +524,7 @@ def expand_cell_entities(cell_count: int) -> tuple[ReadOnlyEntity, ...]:
                 state_class="measurement",
                 unit_of_measurement="Ω",
                 decimals=3,
-                description=f"Cell {n} internal resistance.",
+                description=f"Cell {n} resistance",
                 entity_category="diagnostic",
             )
         )
@@ -543,7 +543,7 @@ FIXED_SENSORS: Final[tuple[ReadOnlyEntity, ...]] = (
         state_class=None,
         unit_of_measurement=None,
         decimals=None,
-        description="BMS model identifier.",
+        description="Model",
         entity_category="diagnostic",
     ),
     ReadOnlyEntity(
@@ -555,7 +555,7 @@ FIXED_SENSORS: Final[tuple[ReadOnlyEntity, ...]] = (
         state_class=None,
         unit_of_measurement=None,
         decimals=None,
-        description="BMS hardware version.",
+        description="Hardware version",
         entity_category="diagnostic",
     ),
     ReadOnlyEntity(
@@ -567,7 +567,7 @@ FIXED_SENSORS: Final[tuple[ReadOnlyEntity, ...]] = (
         state_class=None,
         unit_of_measurement=None,
         decimals=None,
-        description="BMS software / firmware version.",
+        description="Software version",
         entity_category="diagnostic",
     ),
     ReadOnlyEntity(
@@ -579,7 +579,7 @@ FIXED_SENSORS: Final[tuple[ReadOnlyEntity, ...]] = (
         state_class=None,
         unit_of_measurement=None,
         decimals=None,
-        description="BMS serial number.",
+        description="Serial number",
         entity_category="diagnostic",
     ),
 )
@@ -597,7 +597,7 @@ BRIDGE_SENSORS: Final[tuple[ReadOnlyEntity, ...]] = (
         state_class=None,
         unit_of_measurement=None,
         decimals=None,
-        description="Last seen.",
+        description="Last seen",
         follows_bridge_availability=False,
     ),
 )

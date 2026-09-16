@@ -144,18 +144,18 @@ def _base_payload(
     ``discovery_for_*`` builder starts from this so the common shape — and the
     optional ``entity_category`` — lives in exactly one place.
 
-    The suggested entity id is sent twice: ``object_id`` for HA before 2025.10,
-    ``default_entity_id`` (full ``domain.object_id``) for HA 2025.10+. HA 2026.4
-    dropped ``object_id`` entirely; without ``default_entity_id`` new entities
-    fall back to a name slug. Both only affect first registration.
+    No entity id is suggested. MQTT entities get ``has_entity_name`` True, so
+    HA derives ``<domain>.<device name>_<entity name>`` from the device name
+    and ``name`` — the documented convention
+    (https://developers.home-assistant.io/docs/core/entity/#entity-naming),
+    and HA core warns that "in most cases, entities should not set entity_id".
+    ``object_id`` was removed from MQTT discovery in HA 2026.4; its successor
+    ``default_entity_id`` is an override this bridge deliberately does not use.
     """
-    unique_id = f"{bms_name}_device_{object_id}"
     payload: dict[str, Any] = {
         "name": name.rstrip("."),
         "state_topic": _state_topic(bms_name, topic_suffix),
-        "unique_id": unique_id,
-        "object_id": unique_id,
-        "default_entity_id": f"{component.value}.{unique_id.lower()}",
+        "unique_id": f"{bms_name}_device_{object_id}",
         "device": _device_info(bms_name),
     }
     if follows_bridge_availability:

@@ -9,17 +9,17 @@ The add-on imports this module to auto-install the dashboard on startup
 (``install_dashboard`` option); the repo-root ``dashboards/generate.py`` is a
 thin CLI wrapper for manual / legacy use.
 
-## Two entity-naming modes
+## Entity-id naming
 
-The bridge sets the MQTT-discovery ``object_id`` field, so a **fresh** install
-gets deterministic ids ``<domain>.bms_<n>_device_<object_id>`` — the ``device``
-naming mode, derived purely from the entity table.
+The bridge suggests no entity id. MQTT entities carry ``has_entity_name``,
+so Home Assistant derives ``<domain>.<device name>_<entity name>`` by
+slugifying the device name (``BMS_<n>``) and the discovery ``name``. Every
+id this generator emits is therefore ``<domain>.bms_<n>_<name slug>``,
+computed from the entity table — the single source of truth.
 
-Home Assistant's entity registry is *sticky*: installs predating ``object_id``
-kept name-slug ids (``sensor.bms_1_total_pack_voltage``), which never auto-rename
-on upgrade. That non-uniform legacy scheme — verified against a real dump — is
-the ``legacy`` mode, encoded in ``SLUG`` below. The add-on auto-install uses
-``device``; the committed sample + CLI default to ``legacy``.
+An install that registered its entities under an older build keeps those
+ids (HA never renames an existing entity); ``scripts/rename_entities.py``
+migrates such an install to this scheme.
 """
 
 from __future__ import annotations
@@ -28,98 +28,55 @@ import argparse
 import re
 import unicodedata
 from pathlib import Path
+from typing import Final
 
 import yaml
 
-from jkbms2mqtt.entities import WRITABLE_ENTITIES
+from jkbms2mqtt.entities import (
+    BRIDGE_SENSORS,
+    CELL_STATS_SENSORS,
+    FIXED_SENSORS,
+    LIVE_BINARY_SENSORS,
+    LIVE_SENSORS,
+    PACKED_BIT_ENTITIES,
+    WRITABLE_ENTITIES,
+    expand_cell_entities,
+)
 from jkbms2mqtt.mqtt import writable_component
+from jkbms2mqtt.protocol.jk_modbus import MAX_CELLS
 from jkbms2mqtt.protocol.jk_settings import Encoding, WriteTier
 
-# Naming mode for the current build: "legacy" (name-slug, sticky old installs)
-# or "device" (object_id-based, fresh installs). Set by the top-level builders.
-_NAMING = "legacy"
-
 # --------------------------------------------------------------------------- #
-# Entity-id naming — the single source of truth.
+# Entity-id naming — derived from the entity table.
 #
-# This bridge build does NOT emit the MQTT-discovery ``object_id`` field, so
-# Home Assistant derives each entity_id from the device name + the discovery
-# ``name`` (the human description), slugified:
-#
-#     <domain>.bms_<n>_<slug>
-#
-# The slug is NOT uniform: most read-only sensors use the description slug
-# (``total_pack_voltage``), cell-stat sensors use a short name
-# (``cell_voltage_average``), and two controls deviate from their register
-# name. SLUG below is verified verbatim against a real install's
-# Developer-Tools entity dump (BMS_1). Keys are this generator's internal
-# metric names; values are the real entity_id suffix. A key absent from SLUG
-# maps to itself.
+# HA slugifies "<device name> <entity name>" into the entity id, so the id
+# of every entity is ``<domain>.bms_<n>_<slug of that entity's name>``.
 # --------------------------------------------------------------------------- #
 
-SLUG: dict[str, str] = {
-    # live pack
-    "total_voltage": "total_pack_voltage",
-    "total_current": "total_pack_current_negative_discharge",
-    "total_power": "total_pack_power_signed",
-    "soc_percentage": "state_of_charge",
-    "soh_percentage": "state_of_health",
-    "remaining_capacity_ah": "remaining_battery_capacity",
-    "nominal_capacity_ah": "nominal_pack_capacity",
-    "cycle_count": "charge_cycle_count",
-    "total_cycle_capacity_ah": "lifetime_accumulated_charge_throughput",
-    "total_runtime": "total_runtime_since_bms_power_on",
-    "balance_current": "cell_balance_current",
-    "mos_temp": "mosfet_temperature",
-    "probe_1_temp": "probe_1_temperature",
-    "probe_2_temp": "probe_2_temperature",
-    "probe_3_temp": "probe_3_temperature",
-    "probe_4_temp": "probe_4_temperature",
-    "probe_5_temp": "probe_5_temperature",
-    "alarm_bits": "raw_alarm_bitmap_32_bit",
-    "alarms": "comma_separated_list_of_active_alarms",
-    "present_cell_count": "number_of_cells_the_bms_reports_as_present",
-    # nameplate
-    "bms_model": "bms_model_identifier",
-    "hw_version": "bms_hardware_version",
-    "sw_version": "bms_software_firmware_version",
-    "serial_number": "bms_serial_number",
-    # reported MOSFET / balance state (binary_sensor)
-    "switch_charge": "charge_mosfet_state_reported",
-    "switch_discharge": "discharge_mosfet_state_reported",
-    "switch_balance": "balance_state_reported",
-    # writable controls that deviate from their register name
-    "pack_capacity_setting": "configured_pack_capacity_drives_soc_scaling",
-    "short_circuit_protection_delay_us": "short_circuit_protection_trip_delay",
-    # Added after legacy installs were registered: it is a NEW registry entry
-    # on every install, so it gets the bridge's suggested id even there.
-    "last_seen": "device_last_seen",
-    # cell-stat sensors keep their short names (cell_voltage_average, _delta,
-    # _max_value, _min_value, _max_number, _min_number) -> identity, no entry.
-}
 
-# Per-cell sensors: cell_<k>_volt -> cell_<k>_voltage, cell_<k>_ohm -> cell_<k>_internal_resistance.
-_CELL_VOLT = re.compile(r"^cell_(\d+)_volt$")
-_CELL_OHM = re.compile(r"^cell_(\d+)_ohm$")
+def _ha_slugify(text: str) -> str:
+    """Slugify a name the way Home Assistant builds an entity id from it."""
+    ascii_text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode()
+    return re.sub(r"[^a-z0-9]+", "_", ascii_text.lower()).strip("_")
 
 
-def _slug(key: str) -> str:
-    # Device mode: the generator's internal keys ARE the bridge object_ids, so
-    # every entity is simply bms_<n>_device_<object_id>.
-    if _NAMING == "device":
-        return f"device_{key}"
-    # Legacy mode: non-uniform name-slug, per the verified SLUG map.
-    m = _CELL_VOLT.match(key)
-    if m:
-        return f"cell_{m.group(1)}_voltage"
-    m = _CELL_OHM.match(key)
-    if m:
-        return f"cell_{m.group(1)}_internal_resistance"
-    return SLUG.get(key, key)
+def _slug_table() -> dict[str, str]:
+    """``object_id`` -> entity-id slug, for every entity the bridge publishes."""
+    read_only = (
+        *LIVE_SENSORS, *LIVE_BINARY_SENSORS, *CELL_STATS_SENSORS,
+        *FIXED_SENSORS, *BRIDGE_SENSORS, *expand_cell_entities(MAX_CELLS),
+    )
+    table = {e.object_id: _ha_slugify(e.description) for e in read_only}
+    table.update({w.object_id: _ha_slugify(w.description) for w in WRITABLE_ENTITIES})
+    table.update({p.object_id: _ha_slugify(p.bit.description) for p in PACKED_BIT_ENTITIES})
+    return table
+
+
+SLUG: Final[dict[str, str]] = _slug_table()
 
 
 def ent(domain: str, n: int, key: str) -> str:
-    return f"{domain}.bms_{n}_{_slug(key)}"
+    return f"{domain}.bms_{n}_{SLUG[key]}"
 
 
 def sensor(n: int, key: str) -> str:
@@ -131,19 +88,6 @@ def binsensor(n: int, key: str) -> str:
 
 
 _WRITABLES = {w.object_id: w for w in WRITABLE_ENTITIES}
-
-
-def _ha_slugify(text: str) -> str:
-    """HA's entity-id slug of a discovery ``name``.
-
-    Lowercase; every run of characters outside ``a-z0-9`` becomes ``_``.
-    Non-ASCII is dropped where HA's python-slugify transliterates it; for every
-    current setting description the result is identical (checked against
-    python-slugify 9.0.0 — the only non-ASCII character, ``→``, is a separator
-    either way).
-    """
-    ascii_text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode()
-    return re.sub(r"[^a-z0-9]+", "_", ascii_text.lower()).strip("_")
 
 
 def tier_enabled(object_id: str, *, basic_writes: bool, safety_writes: bool) -> bool:
@@ -158,18 +102,12 @@ def setting(n: int, object_id: str, *, writable: bool) -> str:
     Tier on: ``number`` / ``switch``. Tier off: the bridge publishes the same
     object_id read-only as ``sensor`` / ``binary_sensor``.
 
-    Legacy installs registered the two variants at different times, so their
-    slugs differ: the controls carry the register-name slug (``SLUG``), the
-    read-only variants HA's slug of the discovery name (the description) —
-    verified against a real install's HA log, e.g.
-    ``sensor.bms_1_cell_voltage_below_which_the_bms_enters_smart_sleep``.
+    The entity name is the same either way, so only the domain changes.
     """
     w = _WRITABLES[object_id]
     domain = writable_component(
         is_bool=w.register.encoding is Encoding.BOOL32, writable=writable
     ).value
-    if _NAMING == "legacy" and not writable:
-        return f"{domain}.bms_{n}_{_ha_slugify(w.description.rstrip('.'))}"
     return ent(domain, n, object_id)
 
 
@@ -998,24 +936,15 @@ def build_dashboard(
     return {"title": "JK-BMS", "views": views}
 
 
-def _set_naming(naming: str) -> None:
-    # Single-shot generator: naming is a module-wide mode read by _slug(), set
-    # once per build. A module global is the simplest fit here.
-    global _NAMING  # noqa: PLW0603
-    if naming not in ("legacy", "device"):
-        raise SystemExit(f"unknown naming mode: {naming!r} (use legacy or device)")
-    _NAMING = naming
-
-
 def _header(
-    ids: list[int], cells: dict[int, int], naming: str, *, basic_writes: bool, safety_writes: bool
+    ids: list[int], cells: dict[int, int], *, basic_writes: bool, safety_writes: bool
 ) -> str:
     def onoff(enabled: bool) -> str:
         return "on" if enabled else "off"
 
     return (
         "# Generated by jkbms2mqtt (dashboard.py) — do not edit by hand.\n"
-        f"# naming: {naming}  bms-ids: {','.join(map(str, ids))}  "
+        f"# bms-ids: {','.join(map(str, ids))}  "
         f"cells: {','.join(f'{n}={cells[n]}' for n in ids)}\n"
         f"# writes: basic={onoff(basic_writes)}  safety={onoff(safety_writes)}\n"
     )
@@ -1025,7 +954,6 @@ def write_files(
     *,
     ids: list[int],
     cells: dict[int, int],
-    naming: str,
     dashboard_path: Path,
     package_path: Path,
     verify_path: Path | None = None,
@@ -1033,9 +961,8 @@ def write_files(
     safety_writes: bool = False,
 ) -> None:
     """Render the dashboard + package (+ optional probe) and write them to disk."""
-    _set_naming(naming)
     tiers = {"basic_writes": basic_writes, "safety_writes": safety_writes}
-    header = _header(ids, cells, naming, **tiers)
+    header = _header(ids, cells, **tiers)
     dashboard_path.parent.mkdir(parents=True, exist_ok=True)
     dashboard_path.write_text(header + dump_yaml(build_dashboard(ids, cells, **tiers)))
     package_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1055,8 +982,7 @@ def install(
 ) -> tuple[Path, Path]:
     """Write the auto-install dashboard + package into the HA config dir.
 
-    Uses ``device`` naming — what a fresh add-on install publishes (object_id
-    discovery). The write tiers come from the add-on options: tier changes only
+    The write tiers come from the add-on options: tier changes only
     take effect on an add-on restart, which also rewrites this dashboard, so
     its controls / read-only rows always match what the bridge publishes.
     Files land under ``<config>/jkbms2mqtt/`` so the one-time
@@ -1066,7 +992,7 @@ def install(
     dashboard_path = base / "dashboard.yaml"
     package_path = base / "packages" / "jkbms_aggregates.yaml"
     write_files(
-        ids=ids, cells=cells, naming="device",
+        ids=ids, cells=cells,
         dashboard_path=dashboard_path, package_path=package_path,
         basic_writes=basic_writes, safety_writes=safety_writes,
     )
@@ -1080,8 +1006,6 @@ def main(default_dir: Path | None = None) -> int:
                     help="comma-separated slave ids (1..15), e.g. 1,3,7")
     ap.add_argument("--cells", default="16",
                     help="cells per pack: '16' or per-id '1=16,3=8,7=24'")
-    ap.add_argument("--naming", choices=["legacy", "device"], default="legacy",
-                    help="legacy = sticky old name-slug ids; device = fresh-install object_id ids")
     ap.add_argument("--basic-writes", action="store_true",
                     help="enable_basic_writes is on: basic settings become controls")
     ap.add_argument("--safety-writes", action="store_true",
@@ -1094,13 +1018,13 @@ def main(default_dir: Path | None = None) -> int:
     ids = parse_ids(args.bms_ids)
     cells = parse_cells(args.cells, ids)
     write_files(
-        ids=ids, cells=cells, naming=args.naming,
+        ids=ids, cells=cells,
         dashboard_path=Path(args.out), package_path=Path(args.package_out),
         verify_path=Path(args.verify_out),
         basic_writes=args.basic_writes, safety_writes=args.safety_writes,
     )
     print(
-        f"wrote {args.out} ({len(ids)} packs, naming={args.naming}, "
+        f"wrote {args.out} ({len(ids)} packs, "
         f"basic_writes={args.basic_writes}, safety_writes={args.safety_writes})"
     )
     print(f"wrote {args.package_out}")
