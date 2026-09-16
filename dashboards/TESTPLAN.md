@@ -123,10 +123,10 @@ Tap a pack heading → its `BMS n` subview opens.
 | # | Check | Pass criteria |
 |---|---|---|
 | 6.1 | Enable basic writes | Set `enable_basic_writes: true`, restart add-on (manual dashboard: regenerate with `--basic-writes` and re-paste) |
-| 6.2 | Control appears | A basic row becomes an editable `number`/`switch` in Controls |
+| 6.2 | Control appears | A basic setting gains an editable `…_control` `number`/`switch`; its read-only twin keeps the same entity id |
 | 6.3 | Round-trip | Nudge a safe value (e.g. balance trigger), confirm it sticks and reads back; revert it |
 | 6.4 | Gating | Safety rows stay read-only (values shown, not editable) while `enable_safety_writes` is off |
-| 6.5 | Disable again | Set `enable_basic_writes: false`, restart: basic rows are read-only again, no Unavailable rows, no leftover `number`/`switch` entities |
+| 6.5 | Disable again | Set `enable_basic_writes: false`, restart: the `…_control` entities are gone, the read-only twins keep their ids and values, no Unavailable rows |
 
 ## Results
 

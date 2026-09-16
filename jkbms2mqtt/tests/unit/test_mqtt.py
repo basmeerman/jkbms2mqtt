@@ -19,7 +19,9 @@ from jkbms2mqtt.mqtt import (
     DiscoveryMessage,
     _format,
     build_discovery_messages,
+    discovery_for_control,
     discovery_for_packed_bit,
+    discovery_for_packed_bit_control,
     discovery_for_read_only,
     discovery_for_writable,
     orphan_removals,
@@ -132,49 +134,70 @@ class TestReadOnlyFallbackCategory:
 class TestStaleDiscoveryRemoval:
     """Retained configs a previous run may have left behind get cleared (issue #17)."""
 
-    def test_tier_off_publishes_sensor_and_removes_number(self) -> None:
-        msgs = build_discovery_messages(settings=_settings(), bms_name="BMS_1", cell_count=16)
-        assert "homeassistant/sensor/BMS_1_device_max_charge_current/config" in (
-            _config_topics(msgs)
-        )
-        assert "homeassistant/number/BMS_1_device_max_charge_current/config" in (
-            _removal_topics(msgs)
-        )
+    @pytest.mark.parametrize("tier_on", [False, True])
+    def test_read_only_twin_is_published_whatever_the_tier(self, tier_on: bool) -> None:
+        """The stable entity: same id with the tier on or off (issue #23)."""
+        s = _settings(enable_safety_writes=tier_on)
+        msgs = build_discovery_messages(settings=s, bms_name="BMS_1", cell_count=16)
+        topic = "homeassistant/sensor/BMS_1_device_max_charge_current/config"
+        assert topic in _config_topics(msgs)
+        assert topic not in _removal_topics(msgs)
 
-    def test_tier_on_publishes_number_and_removes_sensor(self) -> None:
-        s = _settings(enable_safety_writes=True)
+    def test_control_appears_only_when_the_tier_is_on(self) -> None:
+        control = "homeassistant/number/BMS_1_device_max_charge_current_control/config"
+
+        off = build_discovery_messages(settings=_settings(), bms_name="BMS_1", cell_count=16)
+        assert control not in _config_topics(off)
+        assert control in _removal_topics(off)
+
+        on = build_discovery_messages(
+            settings=_settings(enable_safety_writes=True), bms_name="BMS_1", cell_count=16
+        )
+        assert control in _config_topics(on)
+        assert control not in _removal_topics(on)
+
+    @pytest.mark.parametrize("tier_on", [False, True])
+    def test_legacy_control_topic_is_always_cleared(self, tier_on: bool) -> None:
+        """Before 2.4 the control used the setting's own object_id. Clearing it
+        stops the old entity lingering — or being restored by unique_id."""
+        s = _settings(enable_safety_writes=tier_on, enable_basic_writes=tier_on)
         msgs = build_discovery_messages(settings=s, bms_name="BMS_1", cell_count=16)
         assert "homeassistant/number/BMS_1_device_max_charge_current/config" in (
-            _config_topics(msgs)
-        )
-        assert "homeassistant/sensor/BMS_1_device_max_charge_current/config" in (
             _removal_topics(msgs)
         )
+        assert "homeassistant/switch/BMS_1_device_charging_switch/config" in _removal_topics(msgs)
 
-    @pytest.mark.parametrize("tiers_on", [False, True])
-    def test_bool_writables_remove_other_component(self, tiers_on: bool) -> None:
-        s = _settings(enable_basic_writes=tiers_on)
+    @pytest.mark.parametrize("tier_on", [False, True])
+    def test_bool_writable_twins(self, tier_on: bool) -> None:
+        s = _settings(enable_basic_writes=tier_on)
         msgs = build_discovery_messages(settings=s, bms_name="BMS_1", cell_count=16)
-        live, stale = ("switch", "binary_sensor") if tiers_on else ("binary_sensor", "switch")
-        assert f"homeassistant/{live}/BMS_1_device_charging_switch/config" in _config_topics(msgs)
-        assert f"homeassistant/{stale}/BMS_1_device_charging_switch/config" in (
-            _removal_topics(msgs)
-        )
+        configs = _config_topics(msgs)
+        assert "homeassistant/binary_sensor/BMS_1_device_charging_switch/config" in configs
+        control = "homeassistant/switch/BMS_1_device_charging_switch_control/config"
+        assert (control in configs) is tier_on
+        assert (control in _removal_topics(msgs)) is not tier_on
 
     @pytest.mark.parametrize("tiers_on", [False, True])
-    def test_every_writable_has_exactly_one_config_and_one_removal(self, tiers_on: bool) -> None:
+    def test_every_setting_has_a_read_only_twin_and_a_tier_gated_control(
+        self, tiers_on: bool
+    ) -> None:
         s = _settings(
             enable_basic_writes=tiers_on, enable_safety_writes=tiers_on,
             debug_unverified_fields=True,
         )
         msgs = build_discovery_messages(settings=s, bms_name="BMS_1", cell_count=16)
+        configs, removals = _config_topics(msgs), _removal_topics(msgs)
         for object_id in (
             *(w.object_id for w in WRITABLE_ENTITIES),
             *(p.object_id for p in PACKED_BIT_ENTITIES),
         ):
-            suffix = f"/BMS_1_device_{object_id}/config"
-            assert sum(t.endswith(suffix) for t in _config_topics(msgs)) == 1
-            assert sum(t.endswith(suffix) for t in _removal_topics(msgs)) == 1
+            read_only = f"/BMS_1_device_{object_id}/config"
+            control = f"/BMS_1_device_{object_id}_control/config"
+            # Exactly one read-only twin, always.
+            assert sum(t.endswith(read_only) for t in configs) == 1
+            # The control follows the tier; when absent its topic is cleared.
+            assert sum(t.endswith(control) for t in configs) == (1 if tiers_on else 0)
+            assert sum(t.endswith(control) for t in removals) == (0 if tiers_on else 1)
 
     def test_removal_never_targets_a_published_config(self) -> None:
         for s in (_settings(), _settings(enable_basic_writes=True, enable_safety_writes=True)):
@@ -204,8 +227,10 @@ class TestStaleDiscoveryRemoval:
         removals = _removal_topics(msgs)
         assert "homeassistant/sensor/BMS_1_device_heating_current/config" in removals
         assert "homeassistant/binary_sensor/BMS_1_device_heating/config" in removals
-        assert "homeassistant/switch/BMS_1_device_smart_sleep_switch/config" in removals
+        # Both twins of an unverified packed bit, plus its legacy topic.
         assert "homeassistant/binary_sensor/BMS_1_device_smart_sleep_switch/config" in removals
+        assert "homeassistant/switch/BMS_1_device_smart_sleep_switch/config" in removals
+        assert "homeassistant/switch/BMS_1_device_smart_sleep_switch_control/config" in removals
 
     def test_render_removal_is_empty_payload(self) -> None:
         msg = DiscoveryMessage(topic="homeassistant/sensor/x/config", payload=None)
@@ -256,31 +281,36 @@ class TestBuildDiscoveryMessages:
         s = _settings(enable_basic_writes=True)
         msgs = build_discovery_messages(settings=s, bms_name="BMS_1", cell_count=16)
         topics = _config_topics(msgs)
-        # Basic-tier numeric is now a `number`.
-        assert any("/number/BMS_1_device_smart_sleep_voltage/config" in t for t in topics)
-        # Safety-tier max_charge_current still appears, just as a sensor.
-        assert any("/sensor/BMS_1_device_max_charge_current/config" in t for t in topics)
-        assert not any("/number/BMS_1_device_max_charge_current/config" in t for t in topics)
+        # Basic-tier setting gains its control; both twins are present.
+        assert "homeassistant/sensor/BMS_1_device_smart_sleep_voltage/config" in topics
+        assert "homeassistant/number/BMS_1_device_smart_sleep_voltage_control/config" in topics
+        # The safety-tier setting has only its read-only twin.
+        assert "homeassistant/sensor/BMS_1_device_max_charge_current/config" in topics
+        assert (
+            "homeassistant/number/BMS_1_device_max_charge_current_control/config" not in topics
+        )
 
     def test_safety_writables_when_safety_on(self) -> None:
         s = _settings(enable_safety_writes=True)
         msgs = build_discovery_messages(settings=s, bms_name="BMS_1", cell_count=16)
         topics = _config_topics(msgs)
-        assert any("/number/BMS_1_device_max_charge_current/config" in t for t in topics)
-        # Basic-tier numeric shows up as sensor.
-        assert any("/sensor/BMS_1_device_smart_sleep_voltage/config" in t for t in topics)
-        assert not any("/number/BMS_1_device_smart_sleep_voltage/config" in t for t in topics)
+        assert "homeassistant/number/BMS_1_device_max_charge_current_control/config" in topics
+        assert "homeassistant/sensor/BMS_1_device_smart_sleep_voltage/config" in topics
+        assert (
+            "homeassistant/number/BMS_1_device_smart_sleep_voltage_control/config" not in topics
+        )
 
-    def test_both_toggles_on_with_debug_publishes_packed_bit_as_switch(self) -> None:
+    def test_both_toggles_on_with_debug_publishes_packed_bit_control(self) -> None:
         # Packed bits are unverified — they require debug_unverified_fields=True
-        # to appear at all, and basic tier on to be writable.
+        # to appear at all, and basic tier on to gain a control.
         s = _settings(
             enable_basic_writes=True, enable_safety_writes=True,
             debug_unverified_fields=True,
         )
         msgs = build_discovery_messages(settings=s, bms_name="BMS_1", cell_count=16)
         topics = _config_topics(msgs)
-        assert any("/switch/BMS_1_device_smart_sleep_switch/config" in t for t in topics)
+        assert "homeassistant/binary_sensor/BMS_1_device_smart_sleep_switch/config" in topics
+        assert "homeassistant/switch/BMS_1_device_smart_sleep_switch_control/config" in topics
 
 
 class TestDiscoveryPayloads:
@@ -314,28 +344,32 @@ class TestDiscoveryPayloads:
         msg = discovery_for_read_only(e, "BMS_1", discovery_prefix="homeassistant")
         assert "suggested_display_precision" not in msg.payload
 
-    def test_writable_number_when_tier_enabled(self) -> None:
+    def test_control_is_a_number_with_bounds(self) -> None:
         w = next(x for x in WRITABLE_ENTITIES if x.object_id == "max_charge_current")
-        msg = discovery_for_writable(
-            w, "BMS_1", discovery_prefix="homeassistant", writable=True
-        )
+        msg = discovery_for_control(w, "BMS_1", discovery_prefix="homeassistant")
         p = msg.payload
-        assert msg.topic.startswith("homeassistant/number/")
+        assert msg.topic == (
+            "homeassistant/number/BMS_1_device_max_charge_current_control/config"
+        )
+        assert p["name"] == "Maximum charge current control"
+        assert p["unique_id"] == "BMS_1_device_max_charge_current_control"
         assert p["command_topic"] == "BMS_1/control/max_charge_current/set"
+        assert p["state_topic"] == "BMS_1/control/max_charge_current"
         assert p["min"] == 0
         assert p["max"] == 600
         # max_charge_current now U32_MILLI (1 mA step) on this firmware.
         assert p["step"] == 0.001
         assert p["unit_of_measurement"] == "A"
 
-    def test_writable_number_when_tier_disabled_becomes_sensor(self) -> None:
+    def test_read_only_twin_is_a_sensor_sharing_the_state_topic(self) -> None:
         w = next(x for x in WRITABLE_ENTITIES if x.object_id == "max_charge_current")
-        msg = discovery_for_writable(
-            w, "BMS_1", discovery_prefix="homeassistant", writable=False
-        )
-        assert msg.topic.startswith("homeassistant/sensor/")
+        msg = discovery_for_writable(w, "BMS_1", discovery_prefix="homeassistant")
+        assert msg.topic == "homeassistant/sensor/BMS_1_device_max_charge_current/config"
+        assert msg.payload["name"] == "Maximum charge current"
+        assert msg.payload["unique_id"] == "BMS_1_device_max_charge_current"
         assert "command_topic" not in msg.payload
         assert msg.payload["state_topic"] == "BMS_1/control/max_charge_current"
+        assert msg.payload["unit_of_measurement"] == "A"
 
     def test_writable_switch_when_tier_enabled(self) -> None:
         # No BOOL32 writable currently in the verified register table — build a
@@ -354,10 +388,11 @@ class TestDiscoveryPayloads:
             component=Component.SWITCH,
             description="test switch",
         )
-        msg = discovery_for_writable(
-            w, "BMS_1", discovery_prefix="homeassistant", writable=True
+        msg = discovery_for_control(w, "BMS_1", discovery_prefix="homeassistant")
+        assert msg.topic == (
+            "homeassistant/switch/BMS_1_device_synthetic_switch_control/config"
         )
-        assert msg.topic.startswith("homeassistant/switch/")
+        assert msg.payload["command_topic"] == "BMS_1/control/synthetic_switch/set"
         assert msg.payload["payload_on"] == "ON"
         assert msg.payload["state_off"] == "OFF"
 
@@ -376,26 +411,30 @@ class TestDiscoveryPayloads:
             component=Component.SWITCH,
             description="test switch",
         )
-        msg = discovery_for_writable(
-            w, "BMS_1", discovery_prefix="homeassistant", writable=False
+        msg = discovery_for_writable(w, "BMS_1", discovery_prefix="homeassistant")
+        assert msg.topic == (
+            "homeassistant/binary_sensor/BMS_1_device_synthetic_switch/config"
         )
-        assert msg.topic.startswith("homeassistant/binary_sensor/")
         assert "command_topic" not in msg.payload
+        assert msg.payload["payload_on"] == "ON"
 
-    def test_packed_bit_when_tier_enabled(self) -> None:
+    def test_packed_bit_control_is_a_switch(self) -> None:
         bit = PACKED_BIT_ENTITIES[0]
-        msg = discovery_for_packed_bit(
-            bit, "BMS_1", discovery_prefix="homeassistant", writable=True
+        msg = discovery_for_packed_bit_control(
+            bit, "BMS_1", discovery_prefix="homeassistant"
         )
-        assert msg.topic.startswith("homeassistant/switch/BMS_1_device_")
+        assert msg.topic == (
+            f"homeassistant/switch/BMS_1_device_{bit.object_id}_control/config"
+        )
+        assert msg.payload["command_topic"] == f"BMS_1/{bit.topic_suffix}/set"
         assert msg.payload["state_on"] == "ON"
 
-    def test_packed_bit_when_tier_disabled(self) -> None:
+    def test_packed_bit_read_only_twin_is_a_binary_sensor(self) -> None:
         bit = PACKED_BIT_ENTITIES[0]
-        msg = discovery_for_packed_bit(
-            bit, "BMS_1", discovery_prefix="homeassistant", writable=False
+        msg = discovery_for_packed_bit(bit, "BMS_1", discovery_prefix="homeassistant")
+        assert msg.topic == (
+            f"homeassistant/binary_sensor/BMS_1_device_{bit.object_id}/config"
         )
-        assert msg.topic.startswith("homeassistant/binary_sensor/BMS_1_device_")
         assert "command_topic" not in msg.payload
 
     def test_entity_category_emitted_for_diagnostic_sensor(self) -> None:
@@ -409,33 +448,26 @@ class TestDiscoveryPayloads:
         msg = discovery_for_read_only(e, "BMS_1", discovery_prefix="homeassistant")
         assert "entity_category" not in msg.payload
 
-    def test_entity_category_emitted_for_writable_number(self) -> None:
+    def test_entity_category_config_on_the_control(self) -> None:
         w = next(x for x in WRITABLE_ENTITIES if x.object_id == "max_charge_current")
-        msg = discovery_for_writable(
-            w, "BMS_1", discovery_prefix="homeassistant", writable=True
-        )
+        msg = discovery_for_control(w, "BMS_1", discovery_prefix="homeassistant")
         assert msg.payload["entity_category"] == "config"
 
-    def test_entity_category_diagnostic_for_writable_when_downgraded_to_sensor(self) -> None:
-        """When the tier is off the writable shows as a sensor; HA rejects
-        entity_category=config there, so it becomes diagnostic."""
+    def test_entity_category_diagnostic_on_the_read_only_twin(self) -> None:
+        """HA rejects entity_category=config on a sensor, so the twin is diagnostic."""
         w = next(x for x in WRITABLE_ENTITIES if x.object_id == "max_charge_current")
-        msg = discovery_for_writable(
-            w, "BMS_1", discovery_prefix="homeassistant", writable=False
-        )
+        msg = discovery_for_writable(w, "BMS_1", discovery_prefix="homeassistant")
         assert msg.payload["entity_category"] == "diagnostic"
 
-    def test_entity_category_diagnostic_for_packed_bit_when_downgraded(self) -> None:
+    def test_entity_category_diagnostic_on_a_packed_bit_twin(self) -> None:
         bit = PACKED_BIT_ENTITIES[0]
-        msg = discovery_for_packed_bit(
-            bit, "BMS_1", discovery_prefix="homeassistant", writable=False
-        )
+        msg = discovery_for_packed_bit(bit, "BMS_1", discovery_prefix="homeassistant")
         assert msg.payload["entity_category"] == "diagnostic"
 
-    def test_entity_category_emitted_for_packed_bit(self) -> None:
+    def test_entity_category_config_on_a_packed_bit_control(self) -> None:
         bit = PACKED_BIT_ENTITIES[0]
-        msg = discovery_for_packed_bit(
-            bit, "BMS_1", discovery_prefix="homeassistant", writable=True
+        msg = discovery_for_packed_bit_control(
+            bit, "BMS_1", discovery_prefix="homeassistant"
         )
         assert msg.payload["entity_category"] == "config"
 
@@ -459,9 +491,7 @@ class TestDiscoveryPayloads:
             description="test",
             entity_category=None,
         )
-        msg = discovery_for_writable(
-            w, "BMS_1", discovery_prefix="homeassistant", writable=True
-        )
+        msg = discovery_for_control(w, "BMS_1", discovery_prefix="homeassistant")
         assert "entity_category" not in msg.payload
 
     def test_entity_category_omitted_for_packed_bit_without_category(self) -> None:
@@ -477,8 +507,8 @@ class TestDiscoveryPayloads:
             bit=bit_def,
             entity_category=None,
         )
-        msg = discovery_for_packed_bit(
-            p, "BMS_1", discovery_prefix="homeassistant", writable=True
+        msg = discovery_for_packed_bit_control(
+            p, "BMS_1", discovery_prefix="homeassistant"
         )
         assert "entity_category" not in msg.payload
 
