@@ -149,9 +149,9 @@ def _install_dashboard(  # pragma: no cover - add-on glue
     """Write the auto-install dashboard + package into the HA config dir.
 
     Best-effort: a write failure (e.g. the homeassistant_config map is absent in
-    a standalone container) is logged, never fatal. Uses ``device`` naming —
-    what a fresh install publishes — one cell count for the whole bank, and the
-    current write tiers so settings render as controls or read-only sensors.
+    a standalone container) is logged, never fatal. Uses one cell count for the
+    whole bank and the current write tiers, so settings render as controls or
+    read-only sensors exactly as the bridge publishes them.
     """
     cells = {n: settings.dashboard_cells for n in settings.bms_ids}
     try:

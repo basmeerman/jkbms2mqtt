@@ -60,6 +60,45 @@ The discovery payload carries the appropriate `min` / `max` / `step` bounds.
 Writable entities are only registered in HA Discovery when the corresponding
 tier toggle (`enable_basic_writes` / `enable_safety_writes`) is `true`.
 
+## Entity ids
+
+The bridge does not choose entity ids. Every MQTT entity carries
+`has_entity_name`, so Home Assistant builds the id by slugifying the device
+name and the entity's name:
+
+| Device | Entity name | Entity id |
+|---|---|---|
+| `BMS_1` | Total voltage | `sensor.bms_1_total_voltage` |
+| `BMS_1` | State of charge | `sensor.bms_1_state_of_charge` |
+| `BMS_1` | Maximum charge current | `sensor.bms_1_maximum_charge_current` (`number.…` when the safety tier is on) |
+| `BMS_1` | Cell 1 resistance | `sensor.bms_1_cell_1_resistance` |
+
+This is Home Assistant's [documented convention](https://developers.home-assistant.io/docs/core/entity/#entity-naming);
+HA core warns that "in most cases, entities should not set entity_id". Builds
+before 2.2.0 did override it — first with `object_id` (removed by HA in 2026.4)
+and then with `default_entity_id` — so older installs carry different ids.
+
+**Home Assistant never renames an entity it has already registered.** An
+install that ran an earlier build therefore keeps its old ids, and the
+generated dashboard will not resolve them. `scripts/rename_entities.py`
+migrates such an install:
+
+```sh
+pip install websockets
+export HA_URL="http://homeassistant.local:8123"
+export HA_TOKEN="<long-lived access token>"   # Profile → Security
+python scripts/rename_entities.py             # dry run: prints the plan
+python scripts/rename_entities.py --apply     # performs the renames
+```
+
+It matches every entity by the bridge's `unique_id`
+(`<bms_name>_device_<object_id>`), never by its current id, so it works whatever
+scheme the install ended up with, and leaves entities that already match alone.
+Home Assistant moves recorded history and statistics along with each rename, but
+it does **not** update automations, scripts, scenes, template sensors or
+hand-written dashboards — those keep referencing the old ids and must be edited
+by hand. The add-on's own dashboard follows the new ids on its next restart.
+
 ## Write tiers
 
 Writing settings back to the BMS is gated by two add-on options, both **off**

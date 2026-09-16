@@ -6,36 +6,30 @@ entity ids — verified verbatim against a 6-pack install's Developer-Tools
 entity dump (BMS_1), cross-checked so every entity the generator references
 exists on the running instance.
 
-## Entity-id naming — verified, not assumed
+## Entity-id naming — derived, not hand-maintained
 
-The running bridge build does **not** emit the MQTT-discovery `object_id`
-field, so Home Assistant derives each entity_id from the device name + the
-discovery `name` (the human description), slugified:
+Since 2.2.0 the bridge suggests no entity id. MQTT entities carry
+`has_entity_name`, so Home Assistant slugifies the device name plus each
+entity's `name`:
 
 ```
-<domain>.bms_<n>_<slug>
+<domain>.bms_<n>_<slug of the entity name>
 ```
 
-The slug is **not uniform** — this is the trap that broke the first attempt:
+`sensor.bms_1_total_voltage`, `sensor.bms_1_state_of_charge`,
+`sensor.bms_1_cell_1_resistance`, `sensor.bms_1_maximum_charge_current`
+(`number.…` once its write tier is on).
 
-- Most read-only sensors use the **description** slug:
-  `total_voltage` → `sensor.bms_1_total_pack_voltage`,
-  `mos_temp` → `sensor.bms_1_mosfet_temperature`,
-  `balance_current` → `sensor.bms_1_cell_balance_current`.
-- Cell-stat sensors keep a **short** name: `sensor.bms_1_cell_voltage_average`,
-  `_delta`, `_max_value`, `_min_value`, `_max_number`, `_min_number`.
-- Per-cell: `sensor.bms_1_cell_1_voltage`, `sensor.bms_1_cell_1_internal_resistance`.
-- Reported states are binary_sensors: `binary_sensor.bms_1_charge_mosfet_state_reported`
-  (and `_discharge_…`, `balance_state_reported`).
-- Writable controls mostly use the **register name**
-  (`number.bms_1_max_charge_current`, `switch.bms_1_charging_switch`) — except
-  two: `pack_capacity_setting` → `…_configured_pack_capacity_drives_soc_scaling`,
-  `short_circuit_protection_delay_us` → `…_short_circuit_protection_trip_delay`.
+The generator computes the same slugs from the entity table (`SLUG` in
+`dashboard.py`), so generator and bridge cannot drift: renaming an entity moves
+both. `check_entities.py` reconciles the two at the `(domain, object_id)`
+level in every write-tier combination.
 
-The exact map lives in `generate.py` (`SLUG` + the cell regexes). If a future
-bridge release adds `object_id` to discovery (clean `bms_1_total_voltage`
-names), regenerate against a fresh dump and update `SLUG` — the verify probe
-catches any drift.
+Earlier builds *did* override the id — `object_id` until HA 2026.4 removed it,
+then `default_entity_id` — so installs made before 2.2.0 carry a mix of
+`…_total_pack_voltage` and `…_device_total_voltage` ids. HA never renames an
+existing entity, so `scripts/rename_entities.py` migrates them; it matches on
+the bridge's `unique_id`, which has not changed.
 
 ## Background: why a fresh build, not a port
 
@@ -48,9 +42,8 @@ because of five independent mismatches:
 1. **Entity-id model.** jean-luc yields unit suffixes
    (`sensor.bms_1_total_voltage_v`) and doubled prefixes
    (`sensor.bms_1_bms_1_alarm_list`). jkbms2mqtt's running build yields
-   description-slug names (`sensor.bms_1_total_pack_voltage`) — see the
-   verified naming section above. Different on both sides; a 1:1 port matches
-   neither.
+   HA-derived names (`sensor.bms_1_total_voltage`) — see the naming section
+   above. Different on both sides; a 1:1 port matches neither.
 2. **Missing entities.** `*_total_runtime_formatted`, `*_charge_status_text`,
    `*_charge_status_time_formatted`, `*_balance_action`, `*_bms_alarm_list`,
    `*_visual_status`, and most nameplate fields (`brand`, `manufacturing_date`,
@@ -81,8 +74,9 @@ history-graph).
 `sensor`/`binary_sensor`. The generator takes the tiers (`--basic-writes` /
 `--safety-writes`; the add-on passes its options) and renders each Controls row
 in the matching domain, so settings stay visible read-only when a tier is off.
-On legacy installs the read-only variant is slugged from the description, not
-the register name (verified against a real install's HA log).
+On legacy installs the read-only variants use the `device_` id form, like
+`last_seen` (verified against a legacy install's BMS_1 entity dump, add-on
+2.1.2).
 
 **Unverified/hidden by default:** `heating`, `heating_current`, and the packed
 bits `disable_pcl_module_switch`/`smart_sleep_switch`/`timed_stored_data_switch`
@@ -113,7 +107,7 @@ python dashboards/generate.py --bms-ids 1,2,3,4,5,6 --cells 16
 ### Output structure
 
 - **Overview view** (`type: sections`): one tile per pack, each in its own
-  section gated by `has_value('sensor.bms_<n>_total_pack_voltage')`. Tile:
+  section gated by `has_value('sensor.bms_<n>_last_seen')`. Tile:
   SoC bar, V/A/W gauges, avg/delta/min cell, MOS temp, cycle count, and an
   alarm chip that turns red when `…_comma_separated_list_of_active_alarms` is non-empty. The tile
   heading taps through to that pack's detail subview.

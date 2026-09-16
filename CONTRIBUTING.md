@@ -48,8 +48,8 @@ Quality gates (all run in CI — see `.github/workflows/ci.yml`):
 
 CI jobs: **lint** (ruff + mypy), **test** (pytest + 100% coverage),
 **dashboards** (lint the generator, assert the committed sample is in sync, and
-the entity-drift check in both naming modes), and **docker-build** (validates
-the supervisor's local-build path).
+the entity-drift check across every write-tier combination), and
+**docker-build** (validates the supervisor's local-build path).
 
 ## Architecture
 
@@ -62,14 +62,19 @@ The dashboard is generated, not hand-maintained. The generator lives in the
 package (`src/jkbms2mqtt/dashboard.py`); the add-on imports it to auto-install
 on startup, and `dashboards/generate.py` is a thin CLI wrapper.
 
-- [`dashboards/README.md`](dashboards/README.md) — usage + the two entity-naming
-  modes (`device` for fresh installs, `legacy` for sticky old ones).
+- [`dashboards/README.md`](dashboards/README.md) — usage and entity ids.
 - [`dashboards/PLAN.md`](dashboards/PLAN.md) — design of record.
 - [`dashboards/TESTPLAN.md`](dashboards/TESTPLAN.md) — the live-HA verification
   procedure.
 - `dashboards/check_entities.py` — reconciles the dashboard's entity references
-  against the bridge's entity table; CI runs it in both naming modes so any
+  against the bridge's entity table, in every write-tier combination, so any
   added/removed/renamed entity fails the build.
+
+Entity ids are derived, not written down: Home Assistant slugifies the device
+name plus each entity's `name`, so renaming an entity in `entities.py` /
+`jk_settings.py` changes its entity id. That is a breaking change for existing
+installs — pair it with a note in `MIGRATION.md`, since only
+`scripts/rename_entities.py` can migrate them.
 
 ## Protocol & verification
 

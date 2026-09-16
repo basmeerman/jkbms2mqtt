@@ -1,8 +1,10 @@
 # Local test plan — verify the dashboards on Home Assistant
 
 For a 6-pack setup (`bms_ids: 1,2,3,4,5,6`) using the standard
-`bms_name_prefix: BMS`, i.e. devices `BMS_1`..`BMS_6` and entities
-`<domain>.bms_<n>_device_<object_id>`.
+`bms_name_prefix: BMS`, i.e. devices `BMS_1`..`BMS_6` and entities named after
+the device plus the entity name (`sensor.bms_1_total_voltage`). Installs from
+before 2.2.0 must first run `scripts/rename_entities.py` (see
+[MIGRATION.md](../MIGRATION.md#entity-ids)).
 
 Work top to bottom. **Phase 1 is the gate** — do not import the 2,500-line
 dashboard until the entity names verify, or you'll spend the night chasing
@@ -42,8 +44,8 @@ This confirms HA created the *exact* ids the dashboard expects, before importing
 
 | Line | Expected | If not… |
 |---|---|---|
-| `BMS n read-only: 61/61 present` | 61/61 for every online pack (16S) | A whole pack at `0/61` → that pack is offline or named differently. A **few** missing across *all* packs → an object_id mismatch; report it to me with the `not resolving:` list. Only `last_seen` missing → bridge older than 2.1.0, or HA registered it under a different id (rename it to `sensor.bms_<n>_device_last_seen`). |
-| `BMS n settings: 34/34 present` | `34/34`, whatever the write tiers | Generate with the tier flags matching your Phase 0.4 note. Missing rows with tiers off → read-only ids differ from the description slug; missing rows with a tier on → the controls were not recreated yet (restart the add-on) or got a different id. Report the `not resolving:` list. |
+| `BMS n read-only: 61/61 present` | 61/61 for every online pack (16S) | A whole pack at `0/61` → that pack is offline or named differently. A **few** missing across *all* packs → an object_id mismatch; report it to me with the `not resolving:` list. Only `last_seen` missing → bridge older than 2.1.0, or HA registered it under a different id (run `scripts/rename_entities.py`). |
+| `BMS n settings: 34/34 present` | `34/34`, whatever the write tiers | Generate with the tier flags matching your Phase 0.4 note. Missing rows → the install predates 2.2.0 and still carries its old ids (run `scripts/rename_entities.py`), or a tier was toggled without restarting the add-on. Report the `not resolving:` list. |
 | `Bank aggregates: 0/4` | `0/4` now (package not installed yet) | Becomes `4/4` after Phase 3. |
 
 > Count: 26 pack sensors (incl. `last_seen`) + 3 binary sensors + 2 per cell.

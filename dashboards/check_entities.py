@@ -4,7 +4,7 @@
 The bridge's entity table (``jkbms2mqtt.entities``) is the source of truth for
 what gets published. This script enumerates that table, then enumerates every
 entity the generated dashboard + aggregates package reference, reconciles the
-two through the generator's ``SLUG`` map, and fails the build on any drift:
+two at the ``(domain, object_id)`` level, and fails the build on any drift:
 
 - a verified bridge entity the dashboard does NOT surface (coverage gap), or
 - a dashboard reference with no matching bridge entity (stale / typo'd ref).
@@ -13,29 +13,24 @@ So if someone adds, removes, or renames an entity in ``entities.py`` /
 ``jk_settings.py`` without updating the dashboard, the build goes red.
 
 Writable settings change domain with their write tier (``number`` / ``switch``
-when on, ``sensor`` / ``binary_sensor`` when off), so the check runs per tier
-combination: ``legacy`` against the committed sample (generated with both
-tiers off), ``device`` against in-memory builds for all four combinations.
+when on, ``sensor`` / ``binary_sensor`` when off), so every tier combination is
+checked.
 
-Reconciliation works at the ``(domain, object_id)`` level, NOT on the rendered
-entity-id string — the deployed bridge names entities by a non-uniform
-device-name + description rule that is not reproducible from source (verified
-empirically; see PLAN.md). That means this check catches *set* drift
-(add/remove/rename of an entity) but NOT a description-text edit that only
-changes an HA slug. For slug drift, run ``out/verify-entities.jinja`` against a
-live instance.
+Entity ids come from the entity names via Home Assistant's slug rule, so a
+description edit changes an id. This check works on object ids and therefore
+catches *set* drift, not slug drift; for that, run
+``out/verify-entities.jinja`` against a live instance.
 
 Exit code 0 = in sync, 1 = drift (prints the offending entities).
 """
 
 from __future__ import annotations
 
-import argparse
 import re
 import sys
 from pathlib import Path
 
-from jkbms2mqtt import dashboard as generate  # SLUG map + cell rules (the real generator)
+from jkbms2mqtt import dashboard as generate  # slug table + card builders (the real generator)
 from jkbms2mqtt.entities import (
     BRIDGE_SENSORS,
     CELL_STATS_SENSORS,
@@ -59,11 +54,8 @@ ALLOW_MISSING: set[tuple[str, str]] = set()
 TIER_COMBOS = ((False, False), (True, False), (False, True), (True, True))
 
 _REF = re.compile(r"\b(sensor|binary_sensor|number|switch)\.bms_1_([a-z0-9_]+)")
-_INV_SLUG = {v: k for k, v in generate.SLUG.items()}
-# Legacy read-only variants of settings are slugged from their description.
-_INV_READ_ONLY_SLUG = {
-    generate._ha_slugify(w.description.rstrip(".")): w.object_id for w in WRITABLE_ENTITIES
-}
+# entity-id slug -> object_id, the reverse of the generator's slug table.
+_BY_SLUG = {slug: object_id for object_id, slug in generate.SLUG.items()}
 
 
 def bridge_entities(*, basic_writes: bool, safety_writes: bool) -> set[tuple[str, str]]:
@@ -96,33 +88,13 @@ def bridge_entities(*, basic_writes: bool, safety_writes: bool) -> set[tuple[str
     return out
 
 
-def _slug_to_object_id(domain: str, slug: str, naming: str) -> str:
-    """Reverse the generator's naming: real entity slug -> bridge object_id."""
-    if naming == "device":
-        return slug.removeprefix("device_")
-    if m := re.match(r"^cell_(\d+)_voltage$", slug):
-        return f"cell_{m.group(1)}_volt"
-    if m := re.match(r"^cell_(\d+)_internal_resistance$", slug):
-        return f"cell_{m.group(1)}_ohm"
-    if domain in ("sensor", "binary_sensor") and slug in _INV_READ_ONLY_SLUG:
-        return _INV_READ_ONLY_SLUG[slug]
-    return _INV_SLUG.get(slug, slug)
+def dashboard_entities(*, basic_writes: bool, safety_writes: bool) -> set[tuple[str, str]]:
+    """Every (domain, object_id) the dashboard + package reference.
 
-
-def _dashboard_texts(naming: str, *, basic_writes: bool, safety_writes: bool) -> list[str]:
-    """The dashboard + package YAML to scan for the given naming mode.
-
-    ``legacy`` reads the committed sample (the canonical artifact, both tiers
-    off); ``device`` builds in-memory (the add-on's auto-install output isn't
-    committed).
+    Scans BMS_1 references; the bank aggregates (``*.jkbms_*``) don't match the
+    ``bms_1_`` prefix and are correctly ignored.
     """
-    if naming == "legacy":
-        return [
-            (HERE / "out/jkbms2mqtt-dashboard.yaml").read_text(),
-            (HERE / "packages/jkbms_aggregates.yaml").read_text(),
-        ]
-    generate._set_naming("device")
-    return [
+    texts = [
         generate.dump_yaml(
             generate.build_dashboard(
                 [1], {1: CELLS}, basic_writes=basic_writes, safety_writes=safety_writes
@@ -130,65 +102,40 @@ def _dashboard_texts(naming: str, *, basic_writes: bool, safety_writes: bool) ->
         ),
         generate.dump_yaml(generate.aggregates_package([1])),
     ]
-
-
-def dashboard_entities(
-    naming: str, *, basic_writes: bool, safety_writes: bool
-) -> set[tuple[str, str]]:
-    """Every (domain, object_id) the dashboard + package reference.
-
-    Scans BMS_1 references; the bank aggregates (``*.jkbms_*``) don't match the
-    ``bms_1_`` prefix and are correctly ignored.
-    """
     out: set[tuple[str, str]] = set()
-    texts = _dashboard_texts(naming, basic_writes=basic_writes, safety_writes=safety_writes)
     for text in texts:
         for domain, slug in _REF.findall(text):
-            out.add((domain, _slug_to_object_id(domain, slug, naming)))
+            out.add((domain, _BY_SLUG.get(slug, slug)))
     return out
 
 
-def _check(naming: str, *, basic_writes: bool, safety_writes: bool) -> bool:
+def _check(*, basic_writes: bool, safety_writes: bool) -> bool:
     tiers = {"basic_writes": basic_writes, "safety_writes": safety_writes}
-    label = f"{naming}, basic_writes={basic_writes}, safety_writes={safety_writes}"
+    label = f"basic_writes={basic_writes}, safety_writes={safety_writes}"
     bridge = bridge_entities(**tiers)
-    dash = dashboard_entities(naming, **tiers)
+    dash = dashboard_entities(**tiers)
 
     missing = sorted(bridge - dash - ALLOW_MISSING)  # bridge has, dashboard lacks
     unknown = sorted(dash - bridge)  # dashboard refs, bridge doesn't publish
 
     if not missing and not unknown:
-        print(
-            f"OK ({label}): dashboard references all {len(bridge)} "
-            "verified bridge entities, no extras."
-        )
+        print(f"OK ({label}): dashboard references all {len(bridge)} verified entities, no extras.")
         return True
 
     print(f"DRIFT ({label}):")
-    if missing:
-        print("  bridge publishes these, but the dashboard does not reference them:")
-        for domain, oid in missing:
-            print(f"    + {domain}.<bms>_{oid}")
-    if unknown:
-        print("  dashboard references these, but the bridge does not publish them:")
-        for domain, oid in unknown:
-            print(f"    - {domain}.<bms>_{oid}")
+    for domain, oid in missing:
+        print(f"    + {domain}.<bms>_{oid} — published, not on the dashboard")
+    for domain, oid in unknown:
+        print(f"    - {domain}.<bms>_{oid} — on the dashboard, not published")
     return False
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--naming", choices=["legacy", "device"], default="legacy")
-    args = ap.parse_args()
-
-    combos = ((False, False),) if args.naming == "legacy" else TIER_COMBOS
-    results = [
-        _check(args.naming, basic_writes=basic, safety_writes=safety) for basic, safety in combos
-    ]
+    results = [_check(basic_writes=basic, safety_writes=safety) for basic, safety in TIER_COMBOS]
     if all(results):
         return 0
     print(
-        "\nFix: update dashboards/generate.py (SLUG map / card builders) to match "
+        "\nFix: update the generator (card builders in jkbms2mqtt/dashboard.py) to match "
         "the bridge's entity table, regenerate, and commit. If an omission is "
         "intentional, add it to ALLOW_MISSING with a reason."
     )

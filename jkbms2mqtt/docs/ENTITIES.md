@@ -29,6 +29,100 @@ is turned off.
 See HA's own definition at
 [developers.home-assistant.io/docs/core/entity/#categorizing-entities](https://developers.home-assistant.io/docs/core/entity/#categorizing-entities).
 
+## Entity ids
+
+Home Assistant derives every id from the device name plus the entity name
+(`has_entity_name`), so `BMS_1` + "Total voltage" becomes
+`sensor.bms_1_total_voltage`. The bridge suggests no id of its own.
+
+Renaming an entity changes its id for *new* installs only: HA never renames an
+entity it has already registered. `scripts/rename_entities.py` migrates an
+existing install (see [MIGRATION.md](../../MIGRATION.md#entity-ids)).
+
+The **Description** columns in the tables further down are documentation, not
+the HA name. The names and the ids they produce are listed here, for `BMS_1`:
+
+| Object id | Entity name | Entity id |
+|---|---|---|
+| **Live telemetry** | | |
+| `total_voltage` | Total voltage | `sensor.bms_1_total_voltage` |
+| `total_current` | Total current | `sensor.bms_1_total_current` |
+| `total_power` | Total power | `sensor.bms_1_total_power` |
+| `soc_percentage` | State of charge | `sensor.bms_1_state_of_charge` |
+| `soh_percentage` | State of health | `sensor.bms_1_state_of_health` |
+| `remaining_capacity_ah` | Remaining capacity | `sensor.bms_1_remaining_capacity` |
+| `nominal_capacity_ah` | Nominal capacity | `sensor.bms_1_nominal_capacity` |
+| `cycle_count` | Cycle count | `sensor.bms_1_cycle_count` |
+| `balance_current` | Balance current | `sensor.bms_1_balance_current` |
+| `mos_temp` | MOSFET temperature | `sensor.bms_1_mosfet_temperature` |
+| `probe_1_temp` … `probe_5_temp` | Probe 1 … 5 temperature | `sensor.bms_1_probe_1_temperature` … |
+| `total_runtime` | Runtime | `sensor.bms_1_runtime` |
+| `total_cycle_capacity_ah` | Cycle capacity | `sensor.bms_1_cycle_capacity` |
+| `alarm_bits` | Alarm bits | `sensor.bms_1_alarm_bits` |
+| `alarms` | Alarms | `sensor.bms_1_alarms` |
+| **Live binary** | | |
+| `switch_charge` | Charge MOSFET state | `binary_sensor.bms_1_charge_mosfet_state` |
+| `switch_discharge` | Discharge MOSFET state | `binary_sensor.bms_1_discharge_mosfet_state` |
+| `switch_balance` | Balancing state | `binary_sensor.bms_1_balancing_state` |
+| **Cell statistics** | | |
+| `cell_voltage_average` | Average cell voltage | `sensor.bms_1_average_cell_voltage` |
+| `cell_voltage_delta` | Cell voltage delta | `sensor.bms_1_cell_voltage_delta` |
+| `cell_voltage_max_value` | Maximum cell voltage | `sensor.bms_1_maximum_cell_voltage` |
+| `cell_voltage_min_value` | Minimum cell voltage | `sensor.bms_1_minimum_cell_voltage` |
+| `cell_voltage_max_number` | Highest cell number | `sensor.bms_1_highest_cell_number` |
+| `cell_voltage_min_number` | Lowest cell number | `sensor.bms_1_lowest_cell_number` |
+| `present_cell_count` | Cells present | `sensor.bms_1_cells_present` |
+| **Per cell (n = 1..16)** | | |
+| `cell_<n>_volt` | Cell `<n>` voltage | `sensor.bms_1_cell_<n>_voltage` |
+| `cell_<n>_ohm` | Cell `<n>` resistance | `sensor.bms_1_cell_<n>_resistance` |
+| **Static / nameplate** | | |
+| `bms_model` | Model | `sensor.bms_1_model` |
+| `hw_version` | Hardware version | `sensor.bms_1_hardware_version` |
+| `sw_version` | Software version | `sensor.bms_1_software_version` |
+| `serial_number` | Serial number | `sensor.bms_1_serial_number` |
+| **Bridge** | | |
+| `last_seen` | Last seen | `sensor.bms_1_last_seen` |
+
+Settings take the same ids; only the domain follows the write tier
+(`sensor` / `binary_sensor` when the tier is off, `number` / `switch` when on):
+
+| Object id | Entity name | Entity id (tier off) |
+|---|---|---|
+| `smart_sleep_voltage` | Smart sleep voltage | `sensor.bms_1_smart_sleep_voltage` |
+| `balance_trigger_voltage` | Balance trigger voltage | `sensor.bms_1_balance_trigger_voltage` |
+| `balance_starting_voltage` | Balance starting voltage | `sensor.bms_1_balance_starting_voltage` |
+| `max_balance_current` | Maximum balance current | `sensor.bms_1_maximum_balance_current` |
+| `cell_soc100_voltage` | Cell voltage at 100% SoC | `sensor.bms_1_cell_voltage_at_100_soc` |
+| `cell_soc0_voltage` | Cell voltage at 0% SoC | `sensor.bms_1_cell_voltage_at_0_soc` |
+| `cell_request_charge_voltage` | Charge voltage request | `sensor.bms_1_charge_voltage_request` |
+| `cell_request_float_voltage` | Float voltage request | `sensor.bms_1_float_voltage_request` |
+| `charging_switch` | Charging | `binary_sensor.bms_1_charging` |
+| `discharging_switch` | Discharging | `binary_sensor.bms_1_discharging` |
+| `balance_switch` | Balancing | `binary_sensor.bms_1_balancing` |
+| `cell_voltage_undervoltage_protection` | Cell undervoltage protection | `sensor.bms_1_cell_undervoltage_protection` |
+| `cell_voltage_undervoltage_recovery` | Cell undervoltage recovery | `sensor.bms_1_cell_undervoltage_recovery` |
+| `cell_voltage_overvoltage_protection` | Cell overvoltage protection | `sensor.bms_1_cell_overvoltage_protection` |
+| `cell_voltage_overvoltage_recovery` | Cell overvoltage recovery | `sensor.bms_1_cell_overvoltage_recovery` |
+| `power_off_voltage` | Power-off voltage | `sensor.bms_1_power_off_voltage` |
+| `max_charge_current` | Maximum charge current | `sensor.bms_1_maximum_charge_current` |
+| `charge_overcurrent_protection_delay` | Charge overcurrent delay | `sensor.bms_1_charge_overcurrent_delay` |
+| `charge_overcurrent_protection_recovery_time` | Charge overcurrent recovery time | `sensor.bms_1_charge_overcurrent_recovery_time` |
+| `max_discharge_current` | Maximum discharge current | `sensor.bms_1_maximum_discharge_current` |
+| `discharge_overcurrent_protection_delay` | Discharge overcurrent delay | `sensor.bms_1_discharge_overcurrent_delay` |
+| `discharge_overcurrent_protection_recovery_time` | Discharge overcurrent recovery time | `sensor.bms_1_discharge_overcurrent_recovery_time` |
+| `short_circuit_protection_delay_us` | Short-circuit protection delay | `sensor.bms_1_short_circuit_protection_delay` |
+| `short_circuit_protection_recovery_time` | Short-circuit recovery time | `sensor.bms_1_short_circuit_recovery_time` |
+| `charge_overtemperature_protection` | Charge overtemperature protection | `sensor.bms_1_charge_overtemperature_protection` |
+| `charge_overtemperature_protection_recovery` | Charge overtemperature recovery | `sensor.bms_1_charge_overtemperature_recovery` |
+| `discharge_overtemperature_protection` | Discharge overtemperature protection | `sensor.bms_1_discharge_overtemperature_protection` |
+| `discharge_overtemperature_protection_recovery` | Discharge overtemperature recovery | `sensor.bms_1_discharge_overtemperature_recovery` |
+| `charge_undertemperature_protection` | Charge undertemperature protection | `sensor.bms_1_charge_undertemperature_protection` |
+| `charge_undertemperature_protection_recovery` | Charge undertemperature recovery | `sensor.bms_1_charge_undertemperature_recovery` |
+| `power_tube_overtemperature_protection` | MOSFET overtemperature protection | `sensor.bms_1_mosfet_overtemperature_protection` |
+| `power_tube_overtemperature_protection_recovery` | MOSFET overtemperature recovery | `sensor.bms_1_mosfet_overtemperature_recovery` |
+| `cell_count` | Cell count | `sensor.bms_1_cell_count` |
+| `pack_capacity_setting` | Pack capacity | `sensor.bms_1_pack_capacity` |
+
 ## Access states
 
 | State | Meaning |

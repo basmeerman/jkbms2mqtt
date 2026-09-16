@@ -88,53 +88,53 @@ class PackedBitDef:
 # -- BASIC tier ------------------------------------------------------------------------
 
 BASIC_REGISTERS: Final[tuple[RegisterDef, ...]] = (
-    RegisterDef(name="smart_sleep_voltage", address=0x1000, encoding=Encoding.U32_MILLI, min_value=0.0, max_value=5.0, step=0.01, unit="V", tier=WriteTier.BASIC, description="Cell voltage below which the BMS enters smart sleep."),
-    RegisterDef(name="balance_trigger_voltage", address=0x100A, encoding=Encoding.U32_MILLI, min_value=0.003, max_value=1.000, step=0.001, unit="V", tier=WriteTier.BASIC, description="Cell delta voltage at which balancing kicks in."),
-    RegisterDef(name="cell_soc100_voltage", address=0x100C, encoding=Encoding.U32_MILLI, min_value=1.200, max_value=4.500, step=0.001, unit="V", tier=WriteTier.BASIC, description="Cell voltage that represents 100% SoC (display only)."),
-    RegisterDef(name="cell_soc0_voltage", address=0x100E, encoding=Encoding.U32_MILLI, min_value=1.000, max_value=4.500, step=0.001, unit="V", tier=WriteTier.BASIC, description="Cell voltage that represents 0% SoC (display only)."),
-    RegisterDef(name="cell_request_charge_voltage", address=0x1010, encoding=Encoding.U32_MILLI, min_value=1.20, max_value=5.00, step=0.01, unit="V", tier=WriteTier.BASIC, description="Cell voltage the BMS requests from the charger."),
-    RegisterDef(name="cell_request_float_voltage", address=0x1012, encoding=Encoding.U32_MILLI, min_value=1.20, max_value=5.00, step=0.01, unit="V", tier=WriteTier.BASIC, description="Cell float voltage the BMS requests from the charger."),
-    RegisterDef(name="max_balance_current", address=0x1024, encoding=Encoding.U32_MILLI, min_value=0.0, max_value=10.0, step=0.001, unit="A", tier=WriteTier.BASIC, description="Maximum balance current (hardware-capped at 10 A)."),
+    RegisterDef(name="smart_sleep_voltage", address=0x1000, encoding=Encoding.U32_MILLI, min_value=0.0, max_value=5.0, step=0.01, unit="V", tier=WriteTier.BASIC, description="Smart sleep voltage"),
+    RegisterDef(name="balance_trigger_voltage", address=0x100A, encoding=Encoding.U32_MILLI, min_value=0.003, max_value=1.000, step=0.001, unit="V", tier=WriteTier.BASIC, description="Balance trigger voltage"),
+    RegisterDef(name="cell_soc100_voltage", address=0x100C, encoding=Encoding.U32_MILLI, min_value=1.200, max_value=4.500, step=0.001, unit="V", tier=WriteTier.BASIC, description="Cell voltage at 100% SoC"),
+    RegisterDef(name="cell_soc0_voltage", address=0x100E, encoding=Encoding.U32_MILLI, min_value=1.000, max_value=4.500, step=0.001, unit="V", tier=WriteTier.BASIC, description="Cell voltage at 0% SoC"),
+    RegisterDef(name="cell_request_charge_voltage", address=0x1010, encoding=Encoding.U32_MILLI, min_value=1.20, max_value=5.00, step=0.01, unit="V", tier=WriteTier.BASIC, description="Charge voltage request"),
+    RegisterDef(name="cell_request_float_voltage", address=0x1012, encoding=Encoding.U32_MILLI, min_value=1.20, max_value=5.00, step=0.01, unit="V", tier=WriteTier.BASIC, description="Float voltage request"),
+    RegisterDef(name="max_balance_current", address=0x1024, encoding=Encoding.U32_MILLI, min_value=0.0, max_value=10.0, step=0.001, unit="A", tier=WriteTier.BASIC, description="Maximum balance current"),
     # BOOL switches at spec V1.0 / V1.1 byte offsets 0x70 / 0x74 / 0x78.
     # PR #3 removed these on the wrong assumption that no Modbus address
     # existed; the spec and the BMS_1 capture both confirm them.
-    RegisterDef(name="charging_switch", address=0x1038, encoding=Encoding.BOOL32, min_value=0, max_value=1, step=1, unit=None, tier=WriteTier.BASIC, description="Enable / disable the charge MOSFET."),
-    RegisterDef(name="discharging_switch", address=0x103A, encoding=Encoding.BOOL32, min_value=0, max_value=1, step=1, unit=None, tier=WriteTier.BASIC, description="Enable / disable the discharge MOSFET."),
-    RegisterDef(name="balance_switch", address=0x103C, encoding=Encoding.BOOL32, min_value=0, max_value=1, step=1, unit=None, tier=WriteTier.BASIC, description="Enable / disable active cell balancing."),
-    RegisterDef(name="balance_starting_voltage", address=0x1042, encoding=Encoding.U32_MILLI, min_value=1.200, max_value=4.250, step=0.010, unit="V", tier=WriteTier.BASIC, description="Minimum cell voltage before balancing is enabled."),
+    RegisterDef(name="charging_switch", address=0x1038, encoding=Encoding.BOOL32, min_value=0, max_value=1, step=1, unit=None, tier=WriteTier.BASIC, description="Charging"),
+    RegisterDef(name="discharging_switch", address=0x103A, encoding=Encoding.BOOL32, min_value=0, max_value=1, step=1, unit=None, tier=WriteTier.BASIC, description="Discharging"),
+    RegisterDef(name="balance_switch", address=0x103C, encoding=Encoding.BOOL32, min_value=0, max_value=1, step=1, unit=None, tier=WriteTier.BASIC, description="Balancing"),
+    RegisterDef(name="balance_starting_voltage", address=0x1042, encoding=Encoding.U32_MILLI, min_value=1.200, max_value=4.250, step=0.010, unit="V", tier=WriteTier.BASIC, description="Balance starting voltage"),
 )
 
 
 # -- SAFETY tier -----------------------------------------------------------------------
 
 SAFETY_REGISTERS: Final[tuple[RegisterDef, ...]] = (
-    RegisterDef(name="cell_voltage_undervoltage_protection", address=0x1002, encoding=Encoding.U32_MILLI, min_value=1.20, max_value=4.50, step=0.001, unit="V", tier=WriteTier.SAFETY, description="Under-voltage protection threshold."),
-    RegisterDef(name="cell_voltage_undervoltage_recovery", address=0x1004, encoding=Encoding.U32_MILLI, min_value=1.20, max_value=4.50, step=0.001, unit="V", tier=WriteTier.SAFETY, description="UVP recovery threshold (must be above UVP)."),
-    RegisterDef(name="cell_voltage_overvoltage_protection", address=0x1006, encoding=Encoding.U32_MILLI, min_value=1.20, max_value=4.50, step=0.001, unit="V", tier=WriteTier.SAFETY, description="Over-voltage protection threshold. Set too high → fire risk."),
-    RegisterDef(name="cell_voltage_overvoltage_recovery", address=0x1008, encoding=Encoding.U32_MILLI, min_value=1.20, max_value=4.50, step=0.001, unit="V", tier=WriteTier.SAFETY, description="OVP recovery threshold (must be below OVP)."),
-    RegisterDef(name="power_off_voltage", address=0x1014, encoding=Encoding.U32_MILLI, min_value=1.20, max_value=4.50, step=0.01, unit="V", tier=WriteTier.SAFETY, description="Cell voltage at which the BMS powers off (battery preservation)."),
-    RegisterDef(name="max_charge_current", address=0x1016, encoding=Encoding.U32_MILLI, min_value=0, max_value=600, step=0.001, unit="A", tier=WriteTier.SAFETY, description="Maximum charge current."),
-    RegisterDef(name="charge_overcurrent_protection_delay", address=0x1018, encoding=Encoding.U32_RAW, min_value=1, max_value=600, step=1, unit="s", tier=WriteTier.SAFETY, description="Delay before charge over-current protection trips."),
-    RegisterDef(name="charge_overcurrent_protection_recovery_time", address=0x101A, encoding=Encoding.U32_RAW, min_value=2, max_value=3600, step=1, unit="s", tier=WriteTier.SAFETY, description="Time before charge OCP can be cleared."),
-    RegisterDef(name="max_discharge_current", address=0x101C, encoding=Encoding.U32_MILLI, min_value=0, max_value=600, step=0.001, unit="A", tier=WriteTier.SAFETY, description="Maximum discharge current."),
-    RegisterDef(name="discharge_overcurrent_protection_delay", address=0x101E, encoding=Encoding.U32_RAW, min_value=1, max_value=600, step=1, unit="s", tier=WriteTier.SAFETY, description="Delay before discharge over-current protection trips."),
-    RegisterDef(name="discharge_overcurrent_protection_recovery_time", address=0x1020, encoding=Encoding.U32_RAW, min_value=2, max_value=3600, step=1, unit="s", tier=WriteTier.SAFETY, description="Time before discharge OCP can be cleared."),
-    RegisterDef(name="short_circuit_protection_recovery_time", address=0x1022, encoding=Encoding.U32_RAW, min_value=1, max_value=3600, step=1, unit="s", tier=WriteTier.SAFETY, description="Time before short-circuit protection can be cleared."),
+    RegisterDef(name="cell_voltage_undervoltage_protection", address=0x1002, encoding=Encoding.U32_MILLI, min_value=1.20, max_value=4.50, step=0.001, unit="V", tier=WriteTier.SAFETY, description="Cell undervoltage protection"),
+    RegisterDef(name="cell_voltage_undervoltage_recovery", address=0x1004, encoding=Encoding.U32_MILLI, min_value=1.20, max_value=4.50, step=0.001, unit="V", tier=WriteTier.SAFETY, description="Cell undervoltage recovery"),
+    RegisterDef(name="cell_voltage_overvoltage_protection", address=0x1006, encoding=Encoding.U32_MILLI, min_value=1.20, max_value=4.50, step=0.001, unit="V", tier=WriteTier.SAFETY, description="Cell overvoltage protection"),
+    RegisterDef(name="cell_voltage_overvoltage_recovery", address=0x1008, encoding=Encoding.U32_MILLI, min_value=1.20, max_value=4.50, step=0.001, unit="V", tier=WriteTier.SAFETY, description="Cell overvoltage recovery"),
+    RegisterDef(name="power_off_voltage", address=0x1014, encoding=Encoding.U32_MILLI, min_value=1.20, max_value=4.50, step=0.01, unit="V", tier=WriteTier.SAFETY, description="Power-off voltage"),
+    RegisterDef(name="max_charge_current", address=0x1016, encoding=Encoding.U32_MILLI, min_value=0, max_value=600, step=0.001, unit="A", tier=WriteTier.SAFETY, description="Maximum charge current"),
+    RegisterDef(name="charge_overcurrent_protection_delay", address=0x1018, encoding=Encoding.U32_RAW, min_value=1, max_value=600, step=1, unit="s", tier=WriteTier.SAFETY, description="Charge overcurrent delay"),
+    RegisterDef(name="charge_overcurrent_protection_recovery_time", address=0x101A, encoding=Encoding.U32_RAW, min_value=2, max_value=3600, step=1, unit="s", tier=WriteTier.SAFETY, description="Charge overcurrent recovery time"),
+    RegisterDef(name="max_discharge_current", address=0x101C, encoding=Encoding.U32_MILLI, min_value=0, max_value=600, step=0.001, unit="A", tier=WriteTier.SAFETY, description="Maximum discharge current"),
+    RegisterDef(name="discharge_overcurrent_protection_delay", address=0x101E, encoding=Encoding.U32_RAW, min_value=1, max_value=600, step=1, unit="s", tier=WriteTier.SAFETY, description="Discharge overcurrent delay"),
+    RegisterDef(name="discharge_overcurrent_protection_recovery_time", address=0x1020, encoding=Encoding.U32_RAW, min_value=2, max_value=3600, step=1, unit="s", tier=WriteTier.SAFETY, description="Discharge overcurrent recovery time"),
+    RegisterDef(name="short_circuit_protection_recovery_time", address=0x1022, encoding=Encoding.U32_RAW, min_value=1, max_value=3600, step=1, unit="s", tier=WriteTier.SAFETY, description="Short-circuit recovery time"),
     # Spec V1.1 byte 0x4C → reg 0x1026 is TMPBatCOT (Charge OTP); discharge
     # variants follow at 0x102A/0x102C. The previous table had charge/discharge
     # labels swapped, which would have written discharge-OTP values to the
     # charge-OTP register when both tiers were enabled.
-    RegisterDef(name="charge_overtemperature_protection", address=0x1026, encoding=Encoding.I32_DECI, min_value=-40, max_value=150, step=0.5, unit="°C", tier=WriteTier.SAFETY, description="Charge over-temperature protection."),
-    RegisterDef(name="charge_overtemperature_protection_recovery", address=0x1028, encoding=Encoding.I32_DECI, min_value=-40, max_value=150, step=0.5, unit="°C", tier=WriteTier.SAFETY, description="Charge OTP recovery threshold."),
-    RegisterDef(name="discharge_overtemperature_protection", address=0x102A, encoding=Encoding.I32_DECI, min_value=-40, max_value=150, step=0.5, unit="°C", tier=WriteTier.SAFETY, description="Discharge over-temperature protection."),
-    RegisterDef(name="discharge_overtemperature_protection_recovery", address=0x102C, encoding=Encoding.I32_DECI, min_value=-40, max_value=150, step=0.5, unit="°C", tier=WriteTier.SAFETY, description="Discharge OTP recovery threshold."),
-    RegisterDef(name="charge_undertemperature_protection", address=0x102E, encoding=Encoding.I32_DECI, min_value=-40, max_value=50, step=0.5, unit="°C", tier=WriteTier.SAFETY, description="Charge under-temperature protection (lithium plating risk)."),
-    RegisterDef(name="charge_undertemperature_protection_recovery", address=0x1030, encoding=Encoding.I32_DECI, min_value=-40, max_value=50, step=0.5, unit="°C", tier=WriteTier.SAFETY, description="Charge UTP recovery threshold."),
-    RegisterDef(name="power_tube_overtemperature_protection", address=0x1032, encoding=Encoding.I32_DECI, min_value=30, max_value=100, step=0.5, unit="°C", tier=WriteTier.SAFETY, description="MOSFET over-temperature protection."),
-    RegisterDef(name="power_tube_overtemperature_protection_recovery", address=0x1034, encoding=Encoding.I32_DECI, min_value=30, max_value=100, step=0.5, unit="°C", tier=WriteTier.SAFETY, description="MOSFET OTP recovery threshold."),
-    RegisterDef(name="cell_count", address=0x1036, encoding=Encoding.U32_RAW, min_value=1, max_value=32, step=1, unit=None, tier=WriteTier.SAFETY, description="Number of cells in the pack."),
-    RegisterDef(name="pack_capacity_setting", address=0x103E, encoding=Encoding.U32_MILLI, min_value=0, max_value=10000, step=0.001, unit="Ah", tier=WriteTier.SAFETY, description="Configured pack capacity (drives SoC scaling)."),
-    RegisterDef(name="short_circuit_protection_delay_us", address=0x1040, encoding=Encoding.U32_RAW, min_value=1, max_value=10000, step=1, unit="µs", tier=WriteTier.SAFETY, description="Short-circuit protection trip delay."),
+    RegisterDef(name="charge_overtemperature_protection", address=0x1026, encoding=Encoding.I32_DECI, min_value=-40, max_value=150, step=0.5, unit="°C", tier=WriteTier.SAFETY, description="Charge overtemperature protection"),
+    RegisterDef(name="charge_overtemperature_protection_recovery", address=0x1028, encoding=Encoding.I32_DECI, min_value=-40, max_value=150, step=0.5, unit="°C", tier=WriteTier.SAFETY, description="Charge overtemperature recovery"),
+    RegisterDef(name="discharge_overtemperature_protection", address=0x102A, encoding=Encoding.I32_DECI, min_value=-40, max_value=150, step=0.5, unit="°C", tier=WriteTier.SAFETY, description="Discharge overtemperature protection"),
+    RegisterDef(name="discharge_overtemperature_protection_recovery", address=0x102C, encoding=Encoding.I32_DECI, min_value=-40, max_value=150, step=0.5, unit="°C", tier=WriteTier.SAFETY, description="Discharge overtemperature recovery"),
+    RegisterDef(name="charge_undertemperature_protection", address=0x102E, encoding=Encoding.I32_DECI, min_value=-40, max_value=50, step=0.5, unit="°C", tier=WriteTier.SAFETY, description="Charge undertemperature protection"),
+    RegisterDef(name="charge_undertemperature_protection_recovery", address=0x1030, encoding=Encoding.I32_DECI, min_value=-40, max_value=50, step=0.5, unit="°C", tier=WriteTier.SAFETY, description="Charge undertemperature recovery"),
+    RegisterDef(name="power_tube_overtemperature_protection", address=0x1032, encoding=Encoding.I32_DECI, min_value=30, max_value=100, step=0.5, unit="°C", tier=WriteTier.SAFETY, description="MOSFET overtemperature protection"),
+    RegisterDef(name="power_tube_overtemperature_protection_recovery", address=0x1034, encoding=Encoding.I32_DECI, min_value=30, max_value=100, step=0.5, unit="°C", tier=WriteTier.SAFETY, description="MOSFET overtemperature recovery"),
+    RegisterDef(name="cell_count", address=0x1036, encoding=Encoding.U32_RAW, min_value=1, max_value=32, step=1, unit=None, tier=WriteTier.SAFETY, description="Cell count"),
+    RegisterDef(name="pack_capacity_setting", address=0x103E, encoding=Encoding.U32_MILLI, min_value=0, max_value=10000, step=0.001, unit="Ah", tier=WriteTier.SAFETY, description="Pack capacity"),
+    RegisterDef(name="short_circuit_protection_delay_us", address=0x1040, encoding=Encoding.U32_RAW, min_value=1, max_value=10000, step=1, unit="µs", tier=WriteTier.SAFETY, description="Short-circuit protection delay"),
 )
 
 
@@ -166,9 +166,9 @@ SAFETY_REGISTERS: Final[tuple[RegisterDef, ...]] = (
 PACKED_BIT_REGISTER: Final = 0x1114    # SPEC-DEVIATION — spec says 0x108A
 
 PACKED_BITS: Final[tuple[PackedBitDef, ...]] = (
-    PackedBitDef(name="smart_sleep_switch", register=PACKED_BIT_REGISTER, bit_mask=0x0040, tier=WriteTier.BASIC, description="Enable smart-sleep behaviour."),
-    PackedBitDef(name="disable_pcl_module_switch", register=PACKED_BIT_REGISTER, bit_mask=0x0080, tier=WriteTier.BASIC, description="Disable the pre-charge limit module (V1.1)."),
-    PackedBitDef(name="timed_stored_data_switch", register=PACKED_BIT_REGISTER, bit_mask=0x0100, tier=WriteTier.BASIC, description="Enable periodic data storage in BMS RAM (V1.1)."),
+    PackedBitDef(name="smart_sleep_switch", register=PACKED_BIT_REGISTER, bit_mask=0x0040, tier=WriteTier.BASIC, description="Smart sleep"),
+    PackedBitDef(name="disable_pcl_module_switch", register=PACKED_BIT_REGISTER, bit_mask=0x0080, tier=WriteTier.BASIC, description="Disable PCL module"),
+    PackedBitDef(name="timed_stored_data_switch", register=PACKED_BIT_REGISTER, bit_mask=0x0100, tier=WriteTier.BASIC, description="Timed stored data"),
 )
 
 
