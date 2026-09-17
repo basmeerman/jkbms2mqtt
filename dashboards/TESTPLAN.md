@@ -122,7 +122,7 @@ Tap a pack heading → its `BMS n` subview opens.
 
 | # | Check | Pass criteria |
 |---|---|---|
-| 6.1 | Enable basic writes | Set `enable_basic_writes: true`, restart add-on (manual dashboard: regenerate with `--basic-writes` and re-paste) |
+| 6.1 | Enable basic writes | Set `enable_basic_writes: true`, restart add-on. No dashboard change needed — the rows follow `binary_sensor.jkbms2mqtt_basic_writes` |
 | 6.2 | Control appears | A basic setting gains an editable `…_control` `number`/`switch`; its read-only twin keeps the same entity id |
 | 6.3 | Round-trip | Nudge a safe value (e.g. balance trigger), confirm it sticks and reads back; revert it |
 | 6.4 | Gating | Safety rows stay read-only (values shown, not editable) while `enable_safety_writes` is off |

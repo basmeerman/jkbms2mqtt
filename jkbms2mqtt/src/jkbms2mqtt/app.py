@@ -19,7 +19,13 @@ from jkbms2mqtt import dashboard
 from jkbms2mqtt.bms_runner import BmsRunner
 from jkbms2mqtt.config import Settings, load_settings
 from jkbms2mqtt.entities import writable_by_command_topic_suffix
-from jkbms2mqtt.mqtt import BRIDGE_AVAILABILITY_TOPIC, orphan_removals, render
+from jkbms2mqtt.mqtt import (
+    BRIDGE_AVAILABILITY_TOPIC,
+    bridge_discovery_messages,
+    orphan_removals,
+    render,
+    tier_state_messages,
+)
 from jkbms2mqtt.transport import build_client, connect_with_backoff
 from jkbms2mqtt.write_executor import WriteExecutor, WriteRequest
 
@@ -114,6 +120,15 @@ async def run(settings: Settings) -> None:  # pragma: no cover - top-level glue
     ) as mqtt:
         await mqtt.publish(BRIDGE_AVAILABILITY_TOPIC, b"online", qos=1, retain=True)
 
+        # The write tiers, as retained state. They back the bridge's tier
+        # sensors and gate the availability of every control, so publish them
+        # before any discovery that references them.
+        for topic, payload in tier_state_messages(settings):
+            await mqtt.publish(topic, payload=payload, qos=1, retain=True)
+        for message in bridge_discovery_messages(discovery_prefix=settings.discovery_prefix):
+            config_topic, config_payload = render(message)
+            await mqtt.publish(config_topic, payload=config_payload, qos=1, retain=True)
+
         async def publish(topic: str, payload: str, qos: int = 0, retain: bool = False) -> None:
             await mqtt.publish(topic, payload=payload, qos=qos, retain=retain)
 
@@ -202,16 +217,13 @@ def _install_dashboard(  # pragma: no cover - add-on glue
 
     Best-effort: a write failure (e.g. the homeassistant_config map is absent in
     a standalone container) is logged, never fatal. Uses one cell count for the
-    whole bank and the current write tiers, so settings render as controls or
-    read-only sensors exactly as the bridge publishes them.
+    whole bank. The dashboard is tier-agnostic: its rows switch between a
+    setting's read-only twin and its control from the bridge's tier sensors,
+    so a tier change needs no regeneration.
     """
     cells = {n: settings.dashboard_cells for n in settings.bms_ids}
     try:
-        dash_path, pkg_path = dashboard.install(
-            config_dir, settings.bms_ids, cells,
-            basic_writes=settings.enable_basic_writes,
-            safety_writes=settings.enable_safety_writes,
-        )
+        dash_path, pkg_path = dashboard.install(config_dir, settings.bms_ids, cells)
     except OSError as exc:
         logger.warning("install_dashboard: could not write dashboard files: %s", exc)
         return

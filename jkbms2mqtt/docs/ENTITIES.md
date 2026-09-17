@@ -16,7 +16,7 @@ device page sorts it into one of four sections:
 |---|---|---|
 | **Sensors** | (none) | Primary read-only telemetry — the values you check on the device page every day |
 | **Controls** | (none) | A writable entity with no category. Currently empty: the charging / discharging / balance switches are spec-defined configuration parameters (they tune device behaviour rather than being the pack's main power switch), so they land under **Configuration** instead. |
-| **Configuration** | `config` | The `…_control` entity of every setting and packed-bit toggle, published while its write tier is on; settable thresholds, current limits, OTP / UTP thresholds, etc. |
+| **Configuration** | `config` | The `…_control` entity of every setting and packed-bit toggle; settable thresholds, current limits, OTP / UTP thresholds, etc. Always present, and operable while its write tier is on. |
 | **Diagnostics** | `diagnostic` | Read-only debug / lifetime / static info: model, hw, sw, serial number, cycle count, cycle capacity, runtime, SoH, raw alarm bitmap, present cell count, per-cell internal resistances. Also every setting whose write tier is off: it is then a sensor, and Home Assistant does not allow `config` on sensors. |
 
 When a tier is toggled, a setting moves between `sensor` and `number` (or
@@ -84,7 +84,9 @@ the HA name. The names and the ids they produce are listed here, for `BMS_1`:
 | `last_seen` | Last seen | `sensor.bms_1_last_seen` |
 
 Each setting is published twice: a read-only twin that always exists, and a
-control that exists only while its write tier is on. The control's object id
+control. Both exist permanently; the write tier only decides whether the
+control is available (Home Assistant greys out and refuses to operate an
+unavailable control). The control's object id
 and name carry a `control` suffix, so it gets its own entity id — e.g.
 `number.bms_1_maximum_charge_current_control` next to
 `sensor.bms_1_maximum_charge_current`. The read-only ids below never change:
@@ -237,7 +239,7 @@ value changes, so it cannot tell a steady reading from a stale one.
 ## Read / write — basic tier
 
 The read-only twins land in HA's **Diagnostics** section; their `…_control`
-entities, published while the tier is on, land in **Configuration**.
+entities land in **Configuration**, available while the tier is on.
 All addresses calibrated against spec V1.1 and verified against
 `scripts/captures/BMS_1.txt`. Visible as `number` / `switch` when
 `enable_basic_writes: true`, as `sensor` / `binary_sensor` otherwise (current
@@ -263,7 +265,7 @@ being the device's main on/off switch.
 ### Unverified packed-bit toggles (basic, hidden by default)
 
 Read-only twins in **Diagnostics**; their `…_control` entities in
-**Configuration** (`entity_category: config`) while the tier is on. The
+**Configuration** (`entity_category: config`), available while the tier is on. The
 packed-bit register at `0x1114` holds several boolean flags but the bit
 positions are not yet confirmed. Marked `verified=False`; visible only when
 `debug_unverified_fields: true`.
@@ -277,7 +279,7 @@ positions are not yet confirmed. Marked `verified=False`; visible only when
 ## Read / write — safety tier
 
 The read-only twins land in HA's **Diagnostics** section; their `…_control`
-entities, published while the tier is on, land in **Configuration**.
+entities land in **Configuration**, available while the tier is on.
 All addresses and encodings verified against `scripts/captures/BMS_1.txt` and
 the BMS app screenshots. Visible as `number` when `enable_safety_writes: true`,
 as `sensor` otherwise.

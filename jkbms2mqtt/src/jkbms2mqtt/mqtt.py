@@ -24,13 +24,17 @@ from typing import Any
 
 from jkbms2mqtt.config import Settings
 from jkbms2mqtt.entities import (
+    BRIDGE_DEVICE_ID,
+    BRIDGE_DEVICE_NAME,
     BRIDGE_SENSORS,
+    BRIDGE_TIER_SENSORS,
     CELL_STATS_SENSORS,
     FIXED_SENSORS,
     LIVE_BINARY_SENSORS,
     LIVE_SENSORS,
     PACKED_BIT_ENTITIES,
     WRITABLE_ENTITIES,
+    BridgeTierSensor,
     Component,
     PackedBitEntity,
     ReadOnlyEntity,
@@ -53,6 +57,15 @@ logger = logging.getLogger(__name__)
 # Retained LWT for the bridge process: ``online`` on connect, ``offline`` when
 # the MQTT session dies. Payloads match HA's availability defaults.
 BRIDGE_AVAILABILITY_TOPIC = "jkbms2mqtt/availability"
+
+def tier_topic(tier: WriteTier) -> str:
+    """Retained topic carrying ``online`` / ``offline`` for one write tier.
+
+    Serves two purposes at once: it is the state topic of that tier's bridge
+    sensor, and an availability topic of every control the tier gates — so a
+    control is operable exactly when the tier says so.
+    """
+    return f"jkbms2mqtt/{tier.value}_writes"
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,6 +95,16 @@ def _device_info(bms_name: str) -> dict[str, Any]:
         "name": bms_name,
         "manufacturer": "JIKONG",
         "model": "JK-BMS",
+    }
+
+
+def _bridge_device_info() -> dict[str, Any]:
+    """The HA ``device`` block for the bridge itself."""
+    return {
+        "identifiers": [BRIDGE_DEVICE_ID],
+        "name": BRIDGE_DEVICE_NAME,
+        "manufacturer": "jkbms2mqtt",
+        "model": "JK-BMS to MQTT bridge",
     }
 
 
@@ -266,6 +289,23 @@ def discovery_for_writable(
     )
 
 
+def _gate_on_tier(payload: dict[str, Any], tier: WriteTier) -> None:
+    """Make a control operable only while the bridge is up *and* its tier is on.
+
+    HA disables a control whose entity is unavailable, so gating availability
+    keeps the entity permanently registered — stable id, never deleted, never
+    re-created — while making it impossible to operate when the write would be
+    refused anyway. ``availability`` (a list) must replace ``availability_topic``:
+    the two cannot be used together.
+    """
+    payload.pop("availability_topic", None)
+    payload["availability"] = [
+        {"topic": BRIDGE_AVAILABILITY_TOPIC},
+        {"topic": tier_topic(tier)},
+    ]
+    payload["availability_mode"] = "all"
+
+
 def discovery_for_control(
     entity: WritableEntity, bms_name: str, *, discovery_prefix: str
 ) -> DiscoveryMessage:
@@ -293,6 +333,7 @@ def discovery_for_control(
         entity_category=entity.entity_category,
     )
     payload["command_topic"] = _command_topic(bms_name, entity.topic_suffix)
+    _gate_on_tier(payload, entity.register.tier)
     if entity.register.unit:
         payload["unit_of_measurement"] = entity.register.unit
         decimals = _decimals_for_encoding(entity.register.encoding)
@@ -350,6 +391,7 @@ def discovery_for_packed_bit_control(
         entity_category=entity.entity_category,
     )
     payload["command_topic"] = _command_topic(bms_name, entity.topic_suffix)
+    _gate_on_tier(payload, entity.bit.tier)
     payload["payload_on"] = "ON"
     payload["payload_off"] = "OFF"
     payload["state_on"] = "ON"
@@ -358,6 +400,50 @@ def discovery_for_packed_bit_control(
         topic=_discovery_topic(discovery_prefix, Component.SWITCH, bms_name, object_id),
         payload=payload,
     )
+
+
+def discovery_for_bridge_tier(
+    sensor: BridgeTierSensor, *, discovery_prefix: str
+) -> DiscoveryMessage:
+    """Discovery for one write-tier sensor on the bridge's own device."""
+    unique_id = f"{BRIDGE_DEVICE_ID}_{sensor.object_id}"
+    payload: dict[str, Any] = {
+        "name": sensor.name,
+        "state_topic": tier_topic(sensor.tier),
+        "unique_id": unique_id,
+        "device": _bridge_device_info(),
+        "availability_topic": BRIDGE_AVAILABILITY_TOPIC,
+        "entity_category": "diagnostic",
+        "payload_on": "online",
+        "payload_off": "offline",
+    }
+    return DiscoveryMessage(
+        topic=(
+            f"{discovery_prefix}/{Component.BINARY_SENSOR.value}/"
+            f"{unique_id}/config"
+        ),
+        payload=payload,
+    )
+
+
+def bridge_discovery_messages(*, discovery_prefix: str) -> list[DiscoveryMessage]:
+    """Discovery for the bridge device's entities — published once, not per pack."""
+    return [
+        discovery_for_bridge_tier(s, discovery_prefix=discovery_prefix)
+        for s in BRIDGE_TIER_SENSORS
+    ]
+
+
+def tier_state_messages(settings: Settings) -> list[tuple[str, str]]:
+    """``(topic, payload)`` for each write tier: ``online`` when on, else ``offline``.
+
+    Retained, so the tier sensors and every control's availability survive a
+    Home Assistant restart.
+    """
+    return [
+        (tier_topic(s.tier), "online" if _tier_enabled(settings, s.tier) else "offline")
+        for s in BRIDGE_TIER_SENSORS
+    ]
 
 
 def _decimals_for_encoding(encoding: Encoding) -> int | None:
@@ -431,10 +517,9 @@ def build_discovery_messages(
             remove(control, control_object_id(w.object_id))  # pragma: no cover
             continue  # pragma: no cover
         messages.append(discovery_for_writable(w, bms_name, discovery_prefix=discovery_prefix))
-        if _tier_enabled(settings, w.register.tier):
-            messages.append(discovery_for_control(w, bms_name, discovery_prefix=discovery_prefix))
-        else:
-            remove(control, control_object_id(w.object_id))
+        # Published whatever the tier: the control's availability is gated
+        # instead, so the entity is never deleted and never re-registered.
+        messages.append(discovery_for_control(w, bms_name, discovery_prefix=discovery_prefix))
 
     for p in PACKED_BIT_ENTITIES:
         remove(Component.SWITCH, p.object_id)
@@ -443,12 +528,9 @@ def build_discovery_messages(
             remove(Component.SWITCH, control_object_id(p.object_id))
             continue
         messages.append(discovery_for_packed_bit(p, bms_name, discovery_prefix=discovery_prefix))
-        if _tier_enabled(settings, p.bit.tier):
-            messages.append(
-                discovery_for_packed_bit_control(p, bms_name, discovery_prefix=discovery_prefix)
-            )
-        else:
-            remove(Component.SWITCH, control_object_id(p.object_id))
+        messages.append(
+            discovery_for_packed_bit_control(p, bms_name, discovery_prefix=discovery_prefix)
+        )
 
     return messages
 

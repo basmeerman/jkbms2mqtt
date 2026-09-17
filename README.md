@@ -84,7 +84,8 @@ lovelace:
 
 A **JK-BMS** dashboard appears in the sidebar — bank summary + a tile per pack,
 each linking to a detail page. Change `bms_ids` later and restart the add-on;
-the dashboard regenerates with no re-paste.
+the dashboard regenerates with no re-paste. Toggling a write tier needs no
+regeneration at all: each settings row follows the bridge's tier sensors.
 
 > **Upgrading from a build before 2.2.0?** Home Assistant never renames an
 > entity it has already registered, so your ids may still read

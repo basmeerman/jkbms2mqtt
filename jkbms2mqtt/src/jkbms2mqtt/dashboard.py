@@ -33,6 +33,7 @@ from typing import Final
 import yaml
 
 from jkbms2mqtt.entities import (
+    BRIDGE_DEVICE_NAME,
     BRIDGE_SENSORS,
     CELL_STATS_SENSORS,
     FIXED_SENSORS,
@@ -106,20 +107,14 @@ def binsensor(n: int, key: str) -> str:
 _WRITABLES = {w.object_id: w for w in WRITABLE_ENTITIES}
 
 
-def tier_enabled(object_id: str, *, basic_writes: bool, safety_writes: bool) -> bool:
-    """Whether the write tier of this setting is on (register table is the truth)."""
-    tier = _WRITABLES[object_id].register.tier
-    return basic_writes if tier is WriteTier.BASIC else safety_writes
-
-
 def setting(n: int, object_id: str, *, writable: bool) -> str:
     """Entity id to put on the dashboard for a writable setting.
 
     The bridge publishes two entities per setting: a read-only ``sensor`` /
     ``binary_sensor`` that always exists, and a ``number`` / ``switch``
-    control that exists only while the write tier is on. Show whichever the
-    user can act on: the control when the tier is on, the read-only twin
-    otherwise.
+    control. Both exist permanently; the write tier gates only whether the
+    control is available. Callers pick which id a row should carry: the
+    control when the tier is on, the read-only twin otherwise.
     """
     w = _WRITABLES[object_id]
     is_bool = w.register.encoding is Encoding.BOOL32
@@ -638,31 +633,56 @@ def _diagnostics_section(n: int) -> dict:
     return {"type": "grid", "cards": cards}
 
 
-def _controls_section(n: int, *, basic_writes: bool, safety_writes: bool) -> dict:
-    def rows(items: tuple[tuple[str, str], ...]) -> list[dict]:
-        return [
-            {
-                "entity": setting(
-                    n, oid,
-                    writable=tier_enabled(
-                        oid, basic_writes=basic_writes, safety_writes=safety_writes
-                    ),
-                ),
-                "name": name,
-            }
-            for oid, name in items
-        ]
+def _tier_sensor(tier: WriteTier) -> str:
+    """Entity id of the bridge sensor reporting whether a write tier is on."""
+    return f"binary_sensor.{BRIDGE_DEVICE_NAME}_{tier.value}_writes"
 
-    def mode(enabled: bool, option: str) -> str:
-        return "editable" if enabled else f"read-only (set `{option}: true` to edit)"
+
+def _conditional_row(entity: str, name: str, *, tier: WriteTier, when_on: bool) -> dict:
+    """A row rendered only while the tier sensor says on / off.
+
+    ``hui-conditional-row`` hides the row entirely when the condition is not
+    met, so exactly one of the pair is ever visible and the file is correct in
+    both states — no regeneration when a tier changes.
+    """
+    return {
+        "type": "conditional",
+        "conditions": [
+            {
+                "condition": "state",
+                "entity": _tier_sensor(tier),
+                "state": "on" if when_on else "off",
+            }
+        ],
+        "row": {"entity": entity, "name": name},
+    }
+
+
+def _controls_section(n: int) -> dict:
+    def rows(items: tuple[tuple[str, str], ...]) -> list[dict]:
+        out: list[dict] = []
+        for oid, name in items:
+            tier = _WRITABLES[oid].register.tier
+            # Read-only twin while the tier is off, the control while it is on.
+            out.append(
+                _conditional_row(
+                    setting(n, oid, writable=False), name, tier=tier, when_on=False
+                )
+            )
+            out.append(
+                _conditional_row(
+                    setting(n, oid, writable=True), name, tier=tier, when_on=True
+                )
+            )
+        return out
 
     note = _Block(
-        "**Settings always show the BMS's current value.** The write tiers decide\n"
-        "whether they can be changed from Home Assistant:\n\n"
-        f"- Basic settings: {mode(basic_writes, 'enable_basic_writes')}\n"
-        f"- Safety thresholds: {mode(safety_writes, 'enable_safety_writes')}\n\n"
-        "The add-on rebuilds this dashboard when it restarts; a manually installed\n"
-        "copy must be regenerated after changing a tier.\n\n"
+        "**Settings always show the BMS's current value.** Each row follows its\n"
+        "write tier by itself: read-only while the tier is off, editable while it\n"
+        "is on. No need to regenerate this dashboard when you toggle a tier —\n"
+        "restart the add-on and the rows follow.\n\n"
+        f"- Basic settings: `{_tier_sensor(WriteTier.BASIC)}`\n"
+        f"- Safety thresholds: `{_tier_sensor(WriteTier.SAFETY)}`\n\n"
         "⚠️ Safety thresholds can damage cells or cause a fire if set wrong.\n"
     )
     cards = [
@@ -691,7 +711,7 @@ def _history_section(n: int) -> dict:
     return {"type": "grid", "cards": cards}
 
 
-def detail_view(n: int, cells: int, *, basic_writes: bool, safety_writes: bool) -> dict:
+def detail_view(n: int, cells: int) -> dict:
     return {
         "title": f"BMS {n}",
         "path": f"bms-{n}",
@@ -702,7 +722,7 @@ def detail_view(n: int, cells: int, *, basic_writes: bool, safety_writes: bool) 
             _live_section(n),
             _cells_section(n, cells),
             _diagnostics_section(n),
-            _controls_section(n, basic_writes=basic_writes, safety_writes=safety_writes),
+            _controls_section(n),
             _history_section(n),
         ],
     }
@@ -852,9 +872,7 @@ CORE_SENSORS = (
 CORE_BINARY = ("switch_charge", "switch_discharge", "switch_balance")
 
 
-def _expected_entities(
-    ids: list[int], cells: dict[int, int], *, basic_writes: bool, safety_writes: bool
-) -> dict[str, list[str]]:
+def _expected_entities(ids: list[int], cells: dict[int, int]) -> dict[str, list[str]]:
     groups: dict[str, list[str]] = {}
     for n in ids:
         core = [sensor(n, o) for o in CORE_SENSORS]
@@ -862,12 +880,11 @@ def _expected_entities(
         core += [sensor(n, f"cell_{k}_volt") for k in range(1, cells[n] + 1)]
         core += [sensor(n, f"cell_{k}_ohm") for k in range(1, cells[n] + 1)]
         groups[f"BMS {n} read-only"] = core
-        groups[f"BMS {n} settings"] = [
-            setting(
-                n, o,
-                writable=tier_enabled(o, basic_writes=basic_writes, safety_writes=safety_writes),
-            )
-            for o, _ in BASIC_SWITCHES + BASIC_NUMBERS + SAFETY_NUMBERS
+        groups[f"BMS {n} settings (read-only twins)"] = [
+            setting(n, o, writable=False) for o, _ in BASIC_SWITCHES + BASIC_NUMBERS + SAFETY_NUMBERS
+        ]
+        groups[f"BMS {n} settings (controls)"] = [
+            setting(n, o, writable=True) for o, _ in BASIC_SWITCHES + BASIC_NUMBERS + SAFETY_NUMBERS
         ]
     groups["Bank aggregates (need package)"] = [
         "binary_sensor.jkbms_any_alarm",
@@ -878,13 +895,9 @@ def _expected_entities(
     return groups
 
 
-def verify_template(
-    ids: list[int], cells: dict[int, int], *, basic_writes: bool = False, safety_writes: bool = False
-) -> str:
+def verify_template(ids: list[int], cells: dict[int, int]) -> str:
     """A self-contained Jinja report for Developer Tools → Template."""
-    groups = _expected_entities(
-        ids, cells, basic_writes=basic_writes, safety_writes=safety_writes
-    )
+    groups = _expected_entities(ids, cells)
     lines = ["{%- set groups = {"]
     for name, ents in groups.items():
         joined = ", ".join(f"'{e}'" for e in ents)
@@ -932,10 +945,13 @@ def parse_cells(raw: str, ids: list[int]) -> dict[int, int]:
     return out
 
 
-def build_dashboard(
-    ids: list[int], cells: dict[int, int], *, basic_writes: bool = False, safety_writes: bool = False
-) -> dict:
-    """Build the dashboard; the write tiers must match the add-on's options."""
+def build_dashboard(ids: list[int], cells: dict[int, int]) -> dict:
+    """Build the dashboard.
+
+    Tier-agnostic: each settings row switches between the read-only twin and
+    the control from the bridge's tier sensors, so the same output is correct
+    whatever ``enable_basic_writes`` / ``enable_safety_writes`` are set to.
+    """
     overview = {
         "title": "Overview",
         "path": "overview",
@@ -943,24 +959,16 @@ def build_dashboard(
         "max_columns": 3,
         "sections": [bank_summary_section()] + [overview_section(n) for n in ids],
     }
-    views = [overview] + [
-        detail_view(n, cells[n], basic_writes=basic_writes, safety_writes=safety_writes)
-        for n in ids
-    ]
+    views = [overview] + [detail_view(n, cells[n]) for n in ids]
     return {"title": "JK-BMS", "views": views}
 
 
-def _header(
-    ids: list[int], cells: dict[int, int], *, basic_writes: bool, safety_writes: bool
-) -> str:
-    def onoff(enabled: bool) -> str:
-        return "on" if enabled else "off"
-
+def _header(ids: list[int], cells: dict[int, int]) -> str:
     return (
         "# Generated by jkbms2mqtt (dashboard.py) — do not edit by hand.\n"
         f"# bms-ids: {','.join(map(str, ids))}  "
         f"cells: {','.join(f'{n}={cells[n]}' for n in ids)}\n"
-        f"# writes: basic={onoff(basic_writes)}  safety={onoff(safety_writes)}\n"
+        "# Tier-agnostic: settings rows follow the bridge's write-tier sensors.\n"
     )
 
 
@@ -971,34 +979,21 @@ def write_files(
     dashboard_path: Path,
     package_path: Path,
     verify_path: Path | None = None,
-    basic_writes: bool = False,
-    safety_writes: bool = False,
 ) -> None:
     """Render the dashboard + package (+ optional probe) and write them to disk."""
-    tiers = {"basic_writes": basic_writes, "safety_writes": safety_writes}
-    header = _header(ids, cells, **tiers)
+    header = _header(ids, cells)
     dashboard_path.parent.mkdir(parents=True, exist_ok=True)
-    dashboard_path.write_text(header + dump_yaml(build_dashboard(ids, cells, **tiers)))
+    dashboard_path.write_text(header + dump_yaml(build_dashboard(ids, cells)))
     package_path.parent.mkdir(parents=True, exist_ok=True)
     package_path.write_text(header + dump_yaml(aggregates_package(ids)))
     if verify_path is not None:
         verify_path.parent.mkdir(parents=True, exist_ok=True)
-        verify_path.write_text(verify_template(ids, cells, **tiers))
+        verify_path.write_text(verify_template(ids, cells))
 
 
-def install(
-    config_dir: Path,
-    ids: list[int],
-    cells: dict[int, int],
-    *,
-    basic_writes: bool,
-    safety_writes: bool,
-) -> tuple[Path, Path]:
+def install(config_dir: Path, ids: list[int], cells: dict[int, int]) -> tuple[Path, Path]:
     """Write the auto-install dashboard + package into the HA config dir.
 
-    The write tiers come from the add-on options: tier changes only
-    take effect on an add-on restart, which also rewrites this dashboard, so
-    its controls / read-only rows always match what the bridge publishes.
     Files land under ``<config>/jkbms2mqtt/`` so the one-time
     ``configuration.yaml`` block can include them. Returns the two paths.
     """
@@ -1008,7 +1003,6 @@ def install(
     write_files(
         ids=ids, cells=cells,
         dashboard_path=dashboard_path, package_path=package_path,
-        basic_writes=basic_writes, safety_writes=safety_writes,
     )
     return dashboard_path, package_path
 
@@ -1020,10 +1014,6 @@ def main(default_dir: Path | None = None) -> int:
                     help="comma-separated slave ids (1..15), e.g. 1,3,7")
     ap.add_argument("--cells", default="16",
                     help="cells per pack: '16' or per-id '1=16,3=8,7=24'")
-    ap.add_argument("--basic-writes", action="store_true",
-                    help="enable_basic_writes is on: basic settings become controls")
-    ap.add_argument("--safety-writes", action="store_true",
-                    help="enable_safety_writes is on: safety thresholds become controls")
     ap.add_argument("--out", default=str(here / "out" / "jkbms2mqtt-dashboard.yaml"))
     ap.add_argument("--package-out", default=str(here / "packages" / "jkbms_aggregates.yaml"))
     ap.add_argument("--verify-out", default=str(here / "out" / "verify-entities.jinja"))
@@ -1035,12 +1025,8 @@ def main(default_dir: Path | None = None) -> int:
         ids=ids, cells=cells,
         dashboard_path=Path(args.out), package_path=Path(args.package_out),
         verify_path=Path(args.verify_out),
-        basic_writes=args.basic_writes, safety_writes=args.safety_writes,
     )
-    print(
-        f"wrote {args.out} ({len(ids)} packs, "
-        f"basic_writes={args.basic_writes}, safety_writes={args.safety_writes})"
-    )
+    print(f"wrote {args.out} ({len(ids)} packs, tier-agnostic)")
     print(f"wrote {args.package_out}")
     print(f"wrote {args.verify_out}")
     return 0
