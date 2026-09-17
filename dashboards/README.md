@@ -35,8 +35,8 @@ and **Diagnostics** + **Nameplate**:
 ![Pack detail — Live, Cells, Diagnostics](docs/bms_1a.png)
 
 Scrolling down: **Controls** (every BMS setting with its current value —
-the editable `…_control` row when the add-on's write tier is on, the read-only
-row otherwise) and **History** graphs:
+each row follows the add-on's write tier by itself — read-only while it is off,
+editable while it is on) and **History** graphs:
 
 ![Pack detail — Controls (basic) and History](docs/bms_1b.png)
 ![Pack detail — Safety thresholds and Temperatures history](docs/bms_1c.png)
@@ -78,14 +78,13 @@ python dashboards/generate.py --bms-ids 1,2,3,4,5,6 --cells 16
 # non-contiguous ids, different cell counts per pack
 python dashboards/generate.py --bms-ids 1,3,7 --cells 1=16,3=8,7=24
 
-# write tiers on in the add-on: pass the same tiers
-python dashboards/generate.py --bms-ids 1,2,3,4,5,6 --cells 16 --basic-writes --safety-writes
 ```
 
-The tier flags must match `enable_basic_writes` / `enable_safety_writes` in the
-add-on options (both off by default), because a setting is a `number`/`switch`
-a `…_control` entity only while its tier is on, alongside a read-only
-`sensor`/`binary_sensor` that is always there.
+The output is **tier-agnostic**: every setting is published as a permanent
+read-only twin plus a `…_control` entity, and each Controls row is a
+conditional pair keyed on `binary_sensor.jkbms2mqtt_basic_writes` /
+`…_safety_writes`. The same file is therefore correct whether or not the write
+tiers are on — nothing to pass, nothing to regenerate when you toggle one.
 
 Requires Python 3 + PyYAML (`pip install pyyaml`) — a generator-time tool only,
 nothing extra runs in the add-on. Outputs:
@@ -146,12 +145,11 @@ Copy `jkbms_aggregates.yaml` into `<config>/packages/` and restart HA.
 
 ## Notes & caveats
 
-- **Controls (writes) are tier-gated.** With a tier off, its rows reference the
-  read-only `sensor.*` / `binary_sensor.*` entities; with it on, the editable
-  `number.*` / `switch.*` ones. The auto-installed dashboard follows the add-on
-  options on every restart; after changing a tier, **re-generate a manual
-  dashboard** with the matching `--basic-writes` / `--safety-writes` flags and
-  re-paste. ⚠️ Safety thresholds can damage cells if set wrong.
+- **Controls (writes) are tier-gated, by the dashboard itself.** Each settings
+  row is a conditional pair: the read-only `sensor.*` / `binary_sensor.*` twin
+  while the tier is off, the editable `…_control` while it is on. Toggling a
+  tier needs only an add-on restart — no regeneration, no re-paste.
+  ⚠️ Safety thresholds can damage cells if set wrong.
 - **Older installs need one migration.** Entity ids registered before 2.2.0
   don't match this dashboard; `scripts/rename_entities.py` migrates them, and
   `out/verify-entities.jinja` confirms the result.

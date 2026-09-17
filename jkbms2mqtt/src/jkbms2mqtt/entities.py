@@ -28,6 +28,7 @@ from jkbms2mqtt.protocol.jk_settings import (
     Encoding,
     PackedBitDef,
     RegisterDef,
+    WriteTier,
 )
 
 
@@ -642,6 +643,43 @@ BRIDGE_SENSORS: Final[tuple[ReadOnlyEntity, ...]] = (
         description="Last seen",
         follows_bridge_availability=False,
     ),
+)
+
+
+# -- Bridge-level write-tier sensors --------------------------------------------------
+
+# The bridge's own HA device, carrying the write-tier sensors. Separate from the
+# per-pack BMS_<n> devices: the tiers are a property of the add-on, not of a
+# battery. It also has no area, so HA does not prefix its entity ids with one
+# (issue #29). Defined here rather than in ``mqtt`` so that the dashboard
+# generator can name the tier sensors without importing the MQTT layer — and
+# with it pydantic (issue #24).
+BRIDGE_DEVICE_ID: Final = "jkbms2mqtt_bridge"
+BRIDGE_DEVICE_NAME: Final = "jkbms2mqtt"
+
+
+@dataclass(frozen=True, slots=True)
+class BridgeTierSensor:
+    """A binary sensor reflecting one write tier of the add-on's configuration.
+
+    Unlike everything else in this module these belong to the bridge, not to a
+    pack: there is one pair for the whole add-on, on its own device. Their
+    state comes from ``Settings``, never from a BMS, and the same retained
+    topic gates the availability of that tier's controls — so "is this tier
+    on" has exactly one source of truth.
+
+    A dashboard uses them to show the read-only twin or the ``…_control``
+    entity per row, without being regenerated when a tier changes (issue #30).
+    """
+
+    object_id: str
+    name: str
+    tier: WriteTier
+
+
+BRIDGE_TIER_SENSORS: Final[tuple[BridgeTierSensor, ...]] = (
+    BridgeTierSensor(object_id="basic_writes", name="Basic writes", tier=WriteTier.BASIC),
+    BridgeTierSensor(object_id="safety_writes", name="Safety writes", tier=WriteTier.SAFETY),
 )
 
 

@@ -7,7 +7,6 @@ entry point and writes into ``dashboards/out`` + ``dashboards/packages``.
 
     python dashboards/generate.py --bms-ids 1,2,3,4,5,6 --cells 16
     python dashboards/generate.py --bms-ids 1,3,7 --cells 1=16,3=8,7=24
-    python dashboards/generate.py --bms-ids 1,2 --cells 16 --basic-writes --safety-writes
 """
 
 from __future__ import annotations

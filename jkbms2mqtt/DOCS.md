@@ -118,7 +118,7 @@ lovelace:
 ```
 
 A **JK-BMS** dashboard then appears in the sidebar and *self-updates* — change
-`bms_ids` or a write tier and restart the add-on, and it regenerates with no
+`bms_ids` and restart the add-on, and it regenerates with no
 re-paste. Its **Controls** section always shows every setting's current value:
 as editable controls for a tier that is on, as read-only rows otherwise.
 
@@ -182,13 +182,24 @@ Every setting is published as **two** entities, so its id never changes:
 | | Entity | Exists |
 |---|---|---|
 | Read-only twin | `sensor.bms_1_maximum_charge_current` | always |
-| Control | `number.bms_1_maximum_charge_current_control` | only while its tier is on |
+| Control | `number.bms_1_maximum_charge_current_control` | always; operable only while its tier is on |
 
 The twin always shows the BMS's current value; the control is what you edit.
-Changing a tier needs an add-on restart, after which the control appears or
-disappears while the twin — and anything referencing it — is untouched. The
-auto-installed dashboard follows; a manually generated one must be regenerated
-with the matching `--basic-writes` / `--safety-writes` flags.
+**Neither entity ever appears or disappears.** A write tier decides whether the
+control is *available*: with the tier off Home Assistant greys it out and
+refuses to operate it, and turning the tier on (plus an add-on restart) makes
+the same entity editable again. Nothing is re-registered, so ids never change.
+
+Two entities on the bridge's own device report the tiers, so a dashboard can
+follow them without being regenerated:
+
+| Entity | State |
+|---|---|
+| `binary_sensor.jkbms2mqtt_basic_writes` | on when `enable_basic_writes` |
+| `binary_sensor.jkbms2mqtt_safety_writes` | on when `enable_safety_writes` |
+
+The generated dashboard uses them already: each settings row is a conditional
+pair showing the twin while the tier is off and the control while it is on.
 
 Home Assistant cannot render a read-only `number` or `switch` (`command_topic`
 is required for both), which is why the control is a separate entity rather

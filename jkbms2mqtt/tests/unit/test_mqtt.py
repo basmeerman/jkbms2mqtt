@@ -18,6 +18,7 @@ from jkbms2mqtt.mqtt import (
     BRIDGE_AVAILABILITY_TOPIC,
     DiscoveryMessage,
     _format,
+    bridge_discovery_messages,
     build_discovery_messages,
     discovery_for_control,
     discovery_for_packed_bit,
@@ -30,6 +31,7 @@ from jkbms2mqtt.mqtt import (
     state_messages_from_live,
     state_messages_from_settings,
     state_messages_from_static,
+    tier_state_messages,
 )
 from jkbms2mqtt.protocol.jk_modbus import JkRealtime, JkStaticInfo
 
@@ -143,18 +145,27 @@ class TestStaleDiscoveryRemoval:
         assert topic in _config_topics(msgs)
         assert topic not in _removal_topics(msgs)
 
-    def test_control_appears_only_when_the_tier_is_on(self) -> None:
+    @pytest.mark.parametrize("tier_on", [False, True])
+    def test_control_is_published_whatever_the_tier(self, tier_on: bool) -> None:
+        """The control is never deleted; its availability is gated instead, so
+        the entity is registered once and keeps its id forever (issue #30)."""
         control = "homeassistant/number/BMS_1_device_max_charge_current_control/config"
-
-        off = build_discovery_messages(settings=_settings(), bms_name="BMS_1", cell_count=16)
-        assert control not in _config_topics(off)
-        assert control in _removal_topics(off)
-
-        on = build_discovery_messages(
-            settings=_settings(enable_safety_writes=True), bms_name="BMS_1", cell_count=16
+        msgs = build_discovery_messages(
+            settings=_settings(enable_safety_writes=tier_on), bms_name="BMS_1", cell_count=16
         )
-        assert control in _config_topics(on)
-        assert control not in _removal_topics(on)
+        assert control in _config_topics(msgs)
+        assert control not in _removal_topics(msgs)
+
+    def test_control_availability_is_gated_on_bridge_and_tier(self) -> None:
+        w = next(x for x in WRITABLE_ENTITIES if x.object_id == "max_charge_current")
+        payload = discovery_for_control(w, "BMS_1", discovery_prefix="homeassistant").payload
+        assert payload["availability"] == [
+            {"topic": BRIDGE_AVAILABILITY_TOPIC},
+            {"topic": "jkbms2mqtt/safety_writes"},
+        ]
+        assert payload["availability_mode"] == "all"
+        # `availability` and `availability_topic` must not be used together.
+        assert "availability_topic" not in payload
 
     @pytest.mark.parametrize("tier_on", [False, True])
     def test_legacy_control_topic_is_always_cleared(self, tier_on: bool) -> None:
@@ -173,31 +184,24 @@ class TestStaleDiscoveryRemoval:
         msgs = build_discovery_messages(settings=s, bms_name="BMS_1", cell_count=16)
         configs = _config_topics(msgs)
         assert "homeassistant/binary_sensor/BMS_1_device_charging_switch/config" in configs
-        control = "homeassistant/switch/BMS_1_device_charging_switch_control/config"
-        assert (control in configs) is tier_on
-        assert (control in _removal_topics(msgs)) is not tier_on
+        assert "homeassistant/switch/BMS_1_device_charging_switch_control/config" in configs
 
     @pytest.mark.parametrize("tiers_on", [False, True])
-    def test_every_setting_has_a_read_only_twin_and_a_tier_gated_control(
-        self, tiers_on: bool
-    ) -> None:
+    def test_every_setting_has_both_twins_whatever_the_tier(self, tiers_on: bool) -> None:
         s = _settings(
             enable_basic_writes=tiers_on, enable_safety_writes=tiers_on,
             debug_unverified_fields=True,
         )
         msgs = build_discovery_messages(settings=s, bms_name="BMS_1", cell_count=16)
-        configs, removals = _config_topics(msgs), _removal_topics(msgs)
+        configs = _config_topics(msgs)
         for object_id in (
             *(w.object_id for w in WRITABLE_ENTITIES),
             *(p.object_id for p in PACKED_BIT_ENTITIES),
         ):
             read_only = f"/BMS_1_device_{object_id}/config"
             control = f"/BMS_1_device_{object_id}_control/config"
-            # Exactly one read-only twin, always.
             assert sum(t.endswith(read_only) for t in configs) == 1
-            # The control follows the tier; when absent its topic is cleared.
-            assert sum(t.endswith(control) for t in configs) == (1 if tiers_on else 0)
-            assert sum(t.endswith(control) for t in removals) == (0 if tiers_on else 1)
+            assert sum(t.endswith(control) for t in configs) == 1
 
     def test_removal_never_targets_a_published_config(self) -> None:
         for s in (_settings(), _settings(enable_basic_writes=True, enable_safety_writes=True)):
@@ -277,28 +281,45 @@ class TestBuildDiscoveryMessages:
         assert any("BMS_1_device_smart_sleep_switch" in t for t in topics)
         assert any("BMS_1_device_heating" in t for t in topics)
 
-    def test_basic_writables_when_basic_on(self) -> None:
-        s = _settings(enable_basic_writes=True)
-        msgs = build_discovery_messages(settings=s, bms_name="BMS_1", cell_count=16)
-        topics = _config_topics(msgs)
-        # Basic-tier setting gains its control; both twins are present.
-        assert "homeassistant/sensor/BMS_1_device_smart_sleep_voltage/config" in topics
-        assert "homeassistant/number/BMS_1_device_smart_sleep_voltage_control/config" in topics
-        # The safety-tier setting has only its read-only twin.
-        assert "homeassistant/sensor/BMS_1_device_max_charge_current/config" in topics
-        assert (
-            "homeassistant/number/BMS_1_device_max_charge_current_control/config" not in topics
+    @pytest.mark.parametrize("basic_on", [False, True])
+    @pytest.mark.parametrize("safety_on", [False, True])
+    def test_both_twins_published_for_every_tier_combination(
+        self, basic_on: bool, safety_on: bool
+    ) -> None:
+        """The discovery set no longer depends on the tiers at all — only the
+        controls' availability does."""
+        s = _settings(enable_basic_writes=basic_on, enable_safety_writes=safety_on)
+        topics = _config_topics(
+            build_discovery_messages(settings=s, bms_name="BMS_1", cell_count=16)
         )
+        for topic in (
+            "homeassistant/sensor/BMS_1_device_smart_sleep_voltage/config",
+            "homeassistant/number/BMS_1_device_smart_sleep_voltage_control/config",
+            "homeassistant/sensor/BMS_1_device_max_charge_current/config",
+            "homeassistant/number/BMS_1_device_max_charge_current_control/config",
+        ):
+            assert topic in topics
 
-    def test_safety_writables_when_safety_on(self) -> None:
-        s = _settings(enable_safety_writes=True)
-        msgs = build_discovery_messages(settings=s, bms_name="BMS_1", cell_count=16)
-        topics = _config_topics(msgs)
-        assert "homeassistant/number/BMS_1_device_max_charge_current_control/config" in topics
-        assert "homeassistant/sensor/BMS_1_device_smart_sleep_voltage/config" in topics
-        assert (
-            "homeassistant/number/BMS_1_device_smart_sleep_voltage_control/config" not in topics
-        )
+    def test_tier_state_messages_are_online_offline(self) -> None:
+        on = dict(tier_state_messages(_settings(enable_basic_writes=True)))
+        assert on["jkbms2mqtt/basic_writes"] == "online"
+        assert on["jkbms2mqtt/safety_writes"] == "offline"
+
+    def test_bridge_tier_sensors_are_published_once(self) -> None:
+        msgs = bridge_discovery_messages(discovery_prefix="homeassistant")
+        topics = [m.topic for m in msgs]
+        assert topics == [
+            "homeassistant/binary_sensor/jkbms2mqtt_bridge_basic_writes/config",
+            "homeassistant/binary_sensor/jkbms2mqtt_bridge_safety_writes/config",
+        ]
+        payload = msgs[0].payload
+        assert payload["name"] == "Basic writes"
+        assert payload["state_topic"] == "jkbms2mqtt/basic_writes"
+        assert payload["payload_on"] == "online"
+        assert payload["device"]["name"] == "jkbms2mqtt"
+        assert payload["entity_category"] == "diagnostic"
+        # Visible whatever the tier says, so a dashboard can always read it.
+        assert payload["availability_topic"] == BRIDGE_AVAILABILITY_TOPIC
 
     def test_both_toggles_on_with_debug_publishes_packed_bit_control(self) -> None:
         # Packed bits are unverified — they require debug_unverified_fields=True
@@ -609,6 +630,10 @@ class TestFreshness:
                 continue
             if m.payload["unique_id"] == "BMS_1_device_last_seen":
                 assert "availability_topic" not in m.payload
+            elif "availability" in m.payload:
+                # A control: bridge LWT *and* its write tier (issue #30).
+                assert m.payload["availability"][0] == {"topic": BRIDGE_AVAILABILITY_TOPIC}
+                assert m.payload["availability_mode"] == "all"
             else:
                 assert m.payload["availability_topic"] == BRIDGE_AVAILABILITY_TOPIC, m.topic
 
