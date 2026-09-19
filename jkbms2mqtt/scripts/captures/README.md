@@ -15,7 +15,7 @@ byte-direct write addressing fix. See `docs/HW_TESTBENCH.md` for the runbook.
 
 | File | What it is |
 |---|---|
-| `BMS_<1-6>_baseline.json` | As-found settings of every pack in the bank, captured read-only before any write. Raw words plus decoded values. Also the restore source if a bench run ever aborts. Note pack 6 is configured for 360 Ah against 314 Ah elsewhere, and pack 1 has a 3.50 V over-voltage recovery against 3.58 V elsewhere — pre-existing differences, not faults. |
+| `BMS_<1-6>_baseline.json` | As-found settings of every pack in the bank, captured read-only before any write. Raw words plus decoded values. Also the restore source if a bench run ever aborts. Two packs differed from the rest when captured: pack 6 is configured for 360 Ah against 314 Ah elsewhere (deliberate — that pack is a different capacity), and pack 1 had a 3.50 V cell over-voltage recovery against 3.58 V elsewhere. The pack 1 value was subsequently aligned to 3.58 V at the owner's request; these files keep the original as-found state. |
 | `BMS_1_full_sweep_report.json` | First full write sweep: 30 `pass`, 5 `fail_write`, pack restored. The five failures are the two firmware quirks documented in `docs/HW_TESTBENCH.md` (FC06 unsupported; two parameters already at their ceiling), not addressing faults. |
 | `BMS_1_retest_report.json` | The same five parameters after the bench gained a downward retry and an FC06→FC16 fallback: 5/5 `pass`. Together these put BMS 1 at 35/35 parameters written, verified and restored. |
 
