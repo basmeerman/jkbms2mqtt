@@ -50,7 +50,17 @@ class Encoding(str, Enum):
 
 @dataclass(frozen=True, slots=True)
 class RegisterDef:
-    """One writable parameter (function 0x10, two register words)."""
+    """One writable parameter (function 0x10, two register words).
+
+    ``address`` is a **word index** into the settings block, not the address
+    the firmware wants on the wire. It is ``SETTINGS_BLOCK_BASE + spec_byte/2``,
+    which is exactly what ``decode_register_value`` needs to slice a bulk read
+    that starts at byte 0 — so every read path uses it directly.
+
+    Writes must NOT use it. The firmware interprets a start address as
+    ``block_base + byte_offset``; use :func:`write_address` instead. See
+    issue #32 and docs/HW_TESTBENCH.md for the hardware confirmation.
+    """
 
     name: str
     address: int
@@ -174,10 +184,40 @@ PACKED_BITS: Final[tuple[PackedBitDef, ...]] = (
 
 # -- Public helpers --------------------------------------------------------------------
 
+# Verified writable register addresses span 0x1000..0x1043 as word indices.
+# Defined here (rather than beside the decoders below) because write_address()
+# needs it.
+SETTINGS_BLOCK_BASE: Final = 0x1000
+
 
 def all_registers() -> tuple[RegisterDef, ...]:
     """Return BASIC + SAFETY registers as one tuple."""
     return BASIC_REGISTERS + SAFETY_REGISTERS
+
+
+def write_address(reg: RegisterDef) -> int:
+    """The Modbus start address the firmware expects for a write to *reg*.
+
+    ``RegisterDef.address`` is a word index (``base + spec_byte/2``); the
+    firmware addresses this block by **byte** offset, so the wire address is
+    ``base + spec_byte`` — i.e. twice the offset from the base.
+
+    Evidence, all primary:
+
+    * ``scripts/captures/BMS_1_sweep.txt`` — a read requested at 0x1478
+      returns the bytes at offset 0x78 of the 0x1400 window, so the start
+      address is ``base + byte_offset``.
+    * jean-luc1203/jkbms-rs485-addon ``flows.json`` writes RCVTime (spec byte
+      0x104 of the 0x1400 block) with FC06 to ``0x1504``.
+    * ``docs/FIELD_MATRIX.md`` — phinix writes 0x1070/0x1074/0x1078 for the
+      switches at spec bytes 0x70/0x74/0x78.
+    * Hardware: all 32 numeric parameters written, verified and restored on
+      BMS 1 at these addresses (docs/HW_TESTBENCH.md).
+
+    Without this, every write lands at half the intended offset — inside a
+    *different* parameter, frequently a safety threshold.
+    """
+    return SETTINGS_BLOCK_BASE + 2 * (reg.address - SETTINGS_BLOCK_BASE)
 
 
 def find_register(name: str) -> RegisterDef | None:
@@ -262,9 +302,7 @@ def _i32_to_words(value: int) -> list[int]:
 
 # -- Decoders (settings readback) -----------------------------------------------------
 
-# Verified writable register addresses span 0x1000..0x1043. Read as a single
-# Modbus 0x03 — well under the 125-register protocol ceiling.
-SETTINGS_BLOCK_BASE: Final = 0x1000
+# Read as a single Modbus 0x03 — well under the 125-register protocol ceiling.
 SETTINGS_BLOCK_WORDS: Final = 0x44     # 0x1000..0x1043 covers every BASIC + SAFETY reg
 SETTINGS_BLOCK_CHUNKS: Final = (
     (0x1000, SETTINGS_BLOCK_WORDS),

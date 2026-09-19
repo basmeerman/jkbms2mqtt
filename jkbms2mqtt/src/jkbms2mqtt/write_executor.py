@@ -5,9 +5,11 @@ For each enqueued write the executor:
 1. Verifies the write tier is enabled for the current settings.
 2. Calls the encoder for the parameter — out-of-range values are rejected here
    and never touch the bus.
-3. Calls ``client.write_registers`` (function 0x10) for a normal setting, or
-   read-modify-write of register 0x1114 via ``client.write_register`` (function
-   0x06) for the packed-bit booleans.
+3. Calls ``client.write_registers`` (function 0x10) for a normal setting, at
+   the byte-direct address from ``jk_settings.write_address`` — NOT the table's
+   ``address`` field, which is a word index (issue #32). For the packed-bit
+   booleans it read-modify-writes register 0x1114, trying function 0x06 and
+   falling back to 0x10 on firmware that does not implement 0x06.
 4. Echoes the new value to the parameter's state topic on success, or publishes
    a structured error to ``<bms_name>/error`` on failure.
 """
@@ -28,6 +30,7 @@ from jkbms2mqtt.protocol.jk_settings import (
     WriteTier,
     encode_packed_bit_value,
     encode_value_to_words,
+    write_address,
 )
 
 if TYPE_CHECKING:
@@ -38,6 +41,11 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 PublishFn = Callable[[str, str], Awaitable[None]]
+
+# Modbus exception 2. PB2A16S20P firmware 15.41 answers FC06 with this for the
+# packed-bit register, while FC03 reads it fine and FC16 writes it — so a
+# single-register write falls back to a one-register FC16 write.
+ILLEGAL_DATA_ADDRESS = 2
 
 
 @dataclass(frozen=True, slots=True)
@@ -125,7 +133,7 @@ class WriteExecutor:
             return
 
         response = await self._safe_write_registers(
-            req, address=entity.register.address, values=words
+            req, address=write_address(entity.register), values=words
         )
         if response is None:
             return  # error already published
@@ -195,6 +203,12 @@ class WriteExecutor:
     async def _safe_write_register(
         self, req: WriteRequest, *, address: int, value: int
     ) -> Any | None:
+        """Write one register (FC06), falling back to a one-register FC16 write.
+
+        PB2A16S20P firmware 15.41 rejects FC06 against the packed-bit register
+        with illegal-data-address, although FC03 reads that same register and
+        FC16 writes it. Confirmed on hardware — see docs/HW_TESTBENCH.md.
+        """
         try:
             response = await self.client.write_register(
                 address=address, value=value, device_id=req.slave_addr
@@ -203,8 +217,14 @@ class WriteExecutor:
             await self._publish_error(req, f"write failed: {exc}")
             return None
         if response.isError():
-            await self._publish_error(req, f"BMS rejected write: {response}")
-            return None
+            if getattr(response, "exception_code", None) != ILLEGAL_DATA_ADDRESS:
+                await self._publish_error(req, f"BMS rejected write: {response}")
+                return None
+            logger.info(
+                "FC06 unsupported at %#06x; retrying as a one-register FC16 write",
+                address,
+            )
+            return await self._safe_write_registers(req, address=address, values=[value])
         return response
 
     async def _safe_read_register(

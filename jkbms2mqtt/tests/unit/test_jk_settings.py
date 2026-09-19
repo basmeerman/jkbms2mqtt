@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import ClassVar
+
 import pytest
 
 from jkbms2mqtt.protocol.jk_settings import (
@@ -21,7 +23,55 @@ from jkbms2mqtt.protocol.jk_settings import (
     encode_value_to_words,
     find_packed_bit,
     find_register,
+    write_address,
 )
+
+
+class TestWriteAddress:
+    """The wire address for every writable parameter (issue #32).
+
+    ``RegisterDef.address`` is a word index; the firmware addresses this block
+    by byte offset. Each expectation below is the spec V1.1 index column added
+    to the block base, and every one of them was written, verified and restored
+    against BMS 1 hardware — see docs/HW_TESTBENCH.md.
+    """
+
+    # parameter -> (spec byte offset, wire address)
+    SPEC_PINS: ClassVar[dict[str, tuple[int, int]]] = {
+        "smart_sleep_voltage": (0x00, 0x1000),          # VolSmartSleep
+        "max_charge_current": (0x2C, 0x102C),           # CurBatCOC
+        "max_discharge_current": (0x38, 0x1038),        # CurBatDcOC
+        "max_balance_current": (0x48, 0x1048),          # CurBalanMax
+        "cell_count": (0x6C, 0x106C),                   # CellCount
+        "charging_switch": (0x70, 0x1070),              # BatChargeEN
+        "discharging_switch": (0x74, 0x1074),           # BatDisChargeEN
+        "balance_switch": (0x78, 0x1078),               # BalanEN
+        "pack_capacity_setting": (0x7C, 0x107C),        # CapBatCell
+        "short_circuit_protection_delay_us": (0x80, 0x1080),  # SCPDelay
+        "balance_starting_voltage": (0x84, 0x1084),     # VolStartBalan
+    }
+
+    @pytest.mark.parametrize("name", sorted(SPEC_PINS))
+    def test_matches_the_spec_byte_offset(self, name: str) -> None:
+        reg = find_register(name)
+        assert reg is not None
+        spec_byte, expected = self.SPEC_PINS[name]
+        assert 0x1000 + spec_byte == expected
+        assert write_address(reg) == expected
+
+    def test_is_never_the_raw_table_address(self) -> None:
+        """Only the parameter at byte 0 may coincide; a match elsewhere means
+        the table was silently converted and writes would regress."""
+        same = [r.name for r in all_registers() if write_address(r) == r.address]
+        assert same == ["smart_sleep_voltage"]
+
+    def test_no_two_parameters_share_a_wire_address(self) -> None:
+        addrs = [write_address(r) for r in all_registers()]
+        assert len(addrs) == len(set(addrs))
+
+    def test_every_wire_address_stays_in_the_settings_block(self) -> None:
+        for reg in all_registers():
+            assert 0x1000 <= write_address(reg) <= 0x1087
 
 
 class TestRegisterTable:

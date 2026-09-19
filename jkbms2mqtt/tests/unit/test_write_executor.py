@@ -27,6 +27,7 @@ class FakeResponse:
 
     error: bool = False
     registers: list[int] = field(default_factory=list)
+    exception_code: int | None = None
 
     def isError(self) -> bool:
         return self.error
@@ -143,7 +144,12 @@ async def test_basic_number_write_round_trip() -> None:
 
 
 async def test_safety_number_write() -> None:
-    """max_charge_current at the verified address 0x1016 with mA encoding."""
+    """max_charge_current at its byte-direct wire address with mA encoding.
+
+    Table address is 0x1016 (a word index); spec byte 0x2C (CurBatCOC) puts the
+    wire address at 0x102C. Issue #32 — writing to 0x1016 lands inside
+    balance_trigger_voltage instead.
+    """
     client = FakeClient()
     pub = PublishLog()
     exec_ = WriteExecutor(client=client, settings=_settings(), publish=pub)  # type: ignore[arg-type]
@@ -152,7 +158,7 @@ async def test_safety_number_write() -> None:
             bms_name="BMS_1", slave_addr=2, object_id="max_charge_current", raw_payload="40.0"
         )
     )
-    assert client.last_write_address == 0x1016
+    assert client.last_write_address == 0x102C
     # U32_MILLI: 40.0 A → 40000 mA → [0x0000, 0x9C40]
     assert client.last_write_values == [0, 0x9C40]
     assert client.last_write_slave == 2
@@ -372,6 +378,47 @@ async def test_packed_bit_write_fails() -> None:
     assert any("write failed" in json.loads(p)["reason"] for t, p in pub.log if t.endswith("/error"))
 
 
+async def test_packed_bit_falls_back_to_fc16_when_fc06_unsupported() -> None:
+    """PB2A16S20P 15.41 answers FC06 with illegal-data-address at 0x1114.
+
+    FC03 reads that register fine and FC16 writes it, so the executor must
+    retry rather than report a failure. Confirmed on hardware.
+    """
+    client = FakeClient(
+        read_responses=deque([FakeResponse(registers=[0x00])]),
+        write_register_responses=deque([FakeResponse(error=True, exception_code=2)]),
+    )
+    pub = PublishLog()
+    exec_ = WriteExecutor(client=client, settings=_settings(), publish=pub)  # type: ignore[arg-type]
+    await exec_._handle_one(
+        WriteRequest(
+            bms_name="BMS_1", slave_addr=1, object_id="smart_sleep_switch", raw_payload="ON"
+        )
+    )
+    # The FC16 retry carries the same address and a single-register payload.
+    assert client.last_write_address == 0x1114
+    assert client.last_write_values == [0x40]
+    assert ("BMS_1/control/smart_sleep_switch", "ON") in pub.log
+    assert not any(t.endswith("/error") for t, _ in pub.log)
+
+
+async def test_packed_bit_does_not_fall_back_on_other_exceptions() -> None:
+    """Only illegal-data-address (2) justifies the FC16 retry."""
+    client = FakeClient(
+        read_responses=deque([FakeResponse(registers=[0x00])]),
+        write_register_responses=deque([FakeResponse(error=True, exception_code=3)]),
+    )
+    pub = PublishLog()
+    exec_ = WriteExecutor(client=client, settings=_settings(), publish=pub)  # type: ignore[arg-type]
+    await exec_._handle_one(
+        WriteRequest(
+            bms_name="BMS_1", slave_addr=1, object_id="smart_sleep_switch", raw_payload="ON"
+        )
+    )
+    assert client.last_write_values is None
+    assert any("BMS rejected" in json.loads(p)["reason"] for t, p in pub.log if t.endswith("/error"))
+
+
 async def test_packed_bit_write_returns_modbus_error() -> None:
     client = FakeClient(
         read_responses=deque([FakeResponse(registers=[0])]),
@@ -468,7 +515,7 @@ async def test_bool32_register_write_round_trip() -> None:
         ),
         entity,
     )
-    # BOOL32 encodes True as [0, 1].
-    assert client.last_write_address == 0x1090
+    # BOOL32 encodes True as [0, 1]. Table 0x1090 → spec byte 0x120 → 0x1120.
+    assert client.last_write_address == 0x1120
     assert client.last_write_values == [0, 1]
     assert ("BMS_1/control/synthetic_bool", "ON") in pub.log
