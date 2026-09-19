@@ -22,3 +22,7 @@ env/
 .DS_Store
 *.swp
 recordings/
+# Per-run output of scripts/hw_testbench.py. These are operational safety
+# records (and the restore source if a run aborts), regenerated on every run.
+# Curated evidence lives in scripts/captures/hw_evidence/ instead.
+jkbms2mqtt/scripts/captures/hw_snapshots/
