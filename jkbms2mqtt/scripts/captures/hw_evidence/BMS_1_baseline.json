@@ -9,7 +9,7 @@
     "cell_soc0_voltage": 2.6,
     "cell_soc100_voltage": 3.59,
     "cell_voltage_overvoltage_protection": 3.65,
-    "cell_voltage_overvoltage_recovery": 3.5,
+    "cell_voltage_overvoltage_recovery": 3.58,
     "cell_voltage_undervoltage_protection": 2.58,
     "cell_voltage_undervoltage_recovery": 2.62,
     "charge_overcurrent_protection_delay": 3.0,
@@ -51,7 +51,7 @@
     "0000",
     "0e42",
     "0000",
-    "0dac",
+    "0dfc",
     "0000",
     "000a",
     "0000",
@@ -164,5 +164,5 @@
     "0000"
   ],
   "slave_id": 1,
-  "taken_at": "2026-09-19T06:07:40+00:00"
+  "taken_at": "2026-09-19T08:41:09+00:00"
 }
