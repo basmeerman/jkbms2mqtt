@@ -165,6 +165,13 @@ async def _run_session(  # pragma: no cover - top-level glue
         ]
         bms_by_name = {r.bms_name: r for r in runners}
 
+        # A new session means a possibly-new broker: re-send every retained
+        # value rather than trusting a retained set that may not have survived.
+        # Runners are built per session so their caches are already empty; this
+        # states the guarantee rather than relying on where they are created.
+        for r in runners:
+            r.force_full_republish()
+
         # Single write queue, single executor task
         write_queue: asyncio.Queue[WriteRequest] = asyncio.Queue()
         executor = WriteExecutor(

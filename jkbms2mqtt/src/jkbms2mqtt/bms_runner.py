@@ -104,6 +104,40 @@ class BmsRunner:
     _discovery_announced: bool = field(default=False, init=False)
     _static_info_published: bool = field(default=False, init=False)
     _settings_first_log_done: bool = field(default=False, init=False)
+    # Last payload sent per topic, for the retained groups only. See
+    # ``_publish_retained`` for why live telemetry is deliberately excluded.
+    _published: dict[str, str] = field(default_factory=dict, init=False)
+
+    def force_full_republish(self) -> None:
+        """Forget what has been published, so the next cycle re-sends everything.
+
+        Called when a new MQTT session starts. A broker that restarted may have
+        lost its retained set, and the bridge cannot tell from this side, so
+        nothing about the broker's contents may be assumed to have survived.
+        """
+        self._published.clear()
+
+    async def _publish_retained(self, topic: str, payload: str, qos: int) -> None:
+        """Publish a retained value only when it differs from the last one sent.
+
+        Settings are re-read every cycle but almost never change, so
+        republishing them is pure churn — ~35 retained topics per pack per
+        cycle. They are safe to skip precisely *because* they are retained: the
+        broker keeps the last value and replays it to Home Assistant on
+        resubscribe, so a restart of HA needs nothing from us.
+
+        Live telemetry is NOT filtered, and must not be: it is published with
+        ``retain=False``, so the broker holds nothing. A value that stopped
+        changing would never be re-sent, and an HA restart would leave that
+        entity empty until it happened to change. ``last_seen`` likewise ticks
+        every cycle — it is the freshness heartbeat.
+        """
+        if self._published.get(topic) == payload:
+            return
+        await self.publish(topic, payload, qos, True)
+        # Recorded only after a successful publish: a failure must not convince
+        # us the broker holds a value it never received.
+        self._published[topic] = payload
 
     async def announce_discovery(self) -> None:
         """Publish retained HA Discovery for every appropriate entity."""
@@ -366,4 +400,4 @@ class BmsRunner:
             bms_name=self.bms_name,
             debug_unverified=self.settings.debug_unverified_fields,
         ):
-            await self.publish(topic, payload, 0, True)
+            await self._publish_retained(topic, payload, 0)

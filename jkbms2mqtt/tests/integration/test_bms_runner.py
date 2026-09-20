@@ -635,6 +635,96 @@ async def test_write_ledger_keeps_a_capture_taken_after_the_write() -> None:
     assert by_topic.get("BMS_1/control/max_charge_current") == "40.000"
 
 
+def _control_topics(pub: PublishCapture) -> list[str]:
+    return [t for t, _, _, _ in pub.log if t.startswith("BMS_1/control/")]
+
+
+async def test_retained_settings_are_published_only_when_they_change() -> None:
+    """Settings are re-read every cycle but almost never change."""
+    client = _settings_client_for_guard()
+    pub = PublishCapture()
+    runner = BmsRunner(
+        client=client,  # type: ignore[arg-type]
+        settings=_settings(), slave_addr=1, bms_name="BMS_1", publish=pub,
+    )
+    await runner._poll_once()
+    assert "BMS_1/control/max_charge_current" in _control_topics(pub)
+
+    pub.log.clear()
+    await runner._poll_once()
+    assert _control_topics(pub) == []
+
+    # Non-retained telemetry and the freshness heartbeat must keep publishing:
+    # the broker holds nothing for them, so filtering would strand Home
+    # Assistant after a restart.
+    topics = [t for t, _, _, _ in pub.log]
+    assert "BMS_1/Total_Voltage_V" in topics
+    assert "BMS_1/Last_seen" in topics
+
+
+async def test_a_changed_setting_is_republished() -> None:
+    client = _settings_client_for_guard()
+    pub = PublishCapture()
+    runner = BmsRunner(
+        client=client,  # type: ignore[arg-type]
+        settings=_settings(), slave_addr=1, bms_name="BMS_1", publish=pub,
+    )
+    await runner._poll_once()
+    pub.log.clear()
+
+    client.map.update(_settings_chunk_map(1, _settings_block_with(max_charge_a=50.0)))
+    await runner._poll_once()
+
+    by_topic = {t: p for t, p, _, _ in pub.log}
+    assert by_topic.get("BMS_1/control/max_charge_current") == "50.000"
+    # The parameter that did not move stays quiet.
+    assert "BMS_1/control/smart_sleep_voltage" not in by_topic
+
+
+async def test_force_full_republish_resends_retained_state() -> None:
+    """A new MQTT session may face a broker that lost its retained set."""
+    client = _settings_client_for_guard()
+    pub = PublishCapture()
+    runner = BmsRunner(
+        client=client,  # type: ignore[arg-type]
+        settings=_settings(), slave_addr=1, bms_name="BMS_1", publish=pub,
+    )
+    await runner._poll_once()
+    pub.log.clear()
+
+    runner.force_full_republish()
+    await runner._poll_once()
+    assert "BMS_1/control/max_charge_current" in _control_topics(pub)
+
+
+async def test_a_failed_publish_is_not_remembered() -> None:
+    """Never record a value the broker may not have received."""
+
+    @dataclass
+    class FlakyPublish:
+        log: list[tuple[str, str, int, bool]] = field(default_factory=list)
+        fail: bool = True
+
+        async def __call__(self, topic: str, payload: str, qos: int, retain: bool) -> None:
+            if self.fail and topic.startswith("BMS_1/control/"):
+                raise RuntimeError("broker gone")
+            self.log.append((topic, payload, qos, retain))
+
+    client = _settings_client_for_guard()
+    pub = FlakyPublish()
+    runner = BmsRunner(
+        client=client,  # type: ignore[arg-type]
+        settings=_settings(), slave_addr=1, bms_name="BMS_1", publish=pub,
+    )
+    with pytest.raises(RuntimeError, match="broker gone"):
+        await runner._poll_once()
+
+    pub.fail = False
+    pub.log.clear()
+    await runner._poll_once()
+    assert any(t.startswith("BMS_1/control/") for t, _, _, _ in pub.log)
+
+
 def _settings_chunk_addrs() -> tuple[int, ...]:
     return tuple(addr for addr, _ in SETTINGS_BLOCK_CHUNKS)
 
