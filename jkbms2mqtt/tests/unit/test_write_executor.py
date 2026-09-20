@@ -165,6 +165,61 @@ async def test_safety_number_write() -> None:
     assert ("BMS_1/control/max_charge_current", "40.000") in pub.log
 
 
+async def test_successful_write_is_recorded_in_the_ledger() -> None:
+    """The poll consults this to discard captures the write has superseded (#34)."""
+    from jkbms2mqtt.write_ledger import WriteLedger
+
+    led = WriteLedger()
+    client = FakeClient()
+    pub = PublishLog()
+    exec_ = WriteExecutor(
+        client=client, settings=_settings(), publish=pub, ledger=led  # type: ignore[arg-type]
+    )
+    await exec_._handle_one(
+        WriteRequest(
+            bms_name="BMS_1", slave_addr=1, object_id="max_charge_current", raw_payload="40.0"
+        )
+    )
+    assert led.written_since("BMS_1", "max_charge_current", 0.0) is True
+    # Another pack's identically-named parameter is untouched.
+    assert led.written_since("BMS_2", "max_charge_current", 0.0) is False
+
+
+async def test_rejected_write_is_not_recorded_in_the_ledger() -> None:
+    """A failed write must stay visible, so the readback is not suppressed."""
+    from jkbms2mqtt.write_ledger import WriteLedger
+
+    led = WriteLedger()
+    client = FakeClient(write_responses=deque([FakeResponse(error=True)]))
+    pub = PublishLog()
+    exec_ = WriteExecutor(
+        client=client, settings=_settings(), publish=pub, ledger=led  # type: ignore[arg-type]
+    )
+    await exec_._handle_one(
+        WriteRequest(
+            bms_name="BMS_1", slave_addr=1, object_id="max_charge_current", raw_payload="40.0"
+        )
+    )
+    assert led.written_since("BMS_1", "max_charge_current", 0.0) is False
+
+
+async def test_packed_bit_write_is_recorded_in_the_ledger() -> None:
+    from jkbms2mqtt.write_ledger import WriteLedger
+
+    led = WriteLedger()
+    client = FakeClient(read_responses=deque([FakeResponse(registers=[0x00])]))
+    pub = PublishLog()
+    exec_ = WriteExecutor(
+        client=client, settings=_settings(), publish=pub, ledger=led  # type: ignore[arg-type]
+    )
+    await exec_._handle_one(
+        WriteRequest(
+            bms_name="BMS_1", slave_addr=1, object_id="smart_sleep_switch", raw_payload="ON"
+        )
+    )
+    assert led.written_since("BMS_1", "smart_sleep_switch", 0.0) is True
+
+
 async def test_basic_tier_disabled_refuses() -> None:
     client = FakeClient()
     pub = PublishLog()

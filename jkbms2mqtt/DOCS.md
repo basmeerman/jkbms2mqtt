@@ -52,6 +52,7 @@ Two supported transports between the bus and this add-on:
 | `bms_ids` | `1` | Comma-separated list of Modbus slave addresses (DIP-switch IDs) on the bus. E.g. `1,2,3,4,5,6` for a 6-pack array; non-contiguous like `2,5,7` is fine. Whitespace around commas is OK. |
 | `topology` | `master_poll` | Dropdown. (Currently the only mode for this protocol.) |
 | `poll_interval_s` | `5.0` | Seconds between poll cycles. |
+| `min_frame_gap_ms` | `50` | Minimum silent interval between Modbus frames. RS485 RTU needs a quiet period between requests; without one the BMS ignores the request and only pymodbus's retry succeeds, turning a ~25 ms read into a ~3 s one — invisibly, because the retry works and nothing is logged as failed. Measured threshold on a PB2A16S20P is 35 ms; `50` leaves margin. Raise it if you see slow or timing-out reads, lower it only if you have measured that your hardware tolerates it. |
 | `mqtt_host` | `core-mosquitto.local.hass.io` | The HA Mosquitto broker. |
 | `mqtt_port` | `1883` | |
 | `mqtt_user` / `mqtt_password` | empty | Only needed if your broker requires auth. |

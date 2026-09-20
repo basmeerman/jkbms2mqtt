@@ -12,6 +12,7 @@ from jkbms2mqtt.transport import (
     INITIAL_BACKOFF_S,
     JK_BAUD_RATE,
     MAX_BACKOFF_S,
+    FrameGapClient,
     build_client,
     connect_with_backoff,
 )
@@ -27,9 +28,11 @@ class TestBuildClient:
             gateway_port=502,
         )
         c = build_client(s)
-        assert isinstance(c, AsyncModbusTcpClient)
-        assert c.comm_params.host == "10.0.0.1"
-        assert c.comm_params.port == 502
+        assert isinstance(c, FrameGapClient)
+        inner = c.inner
+        assert isinstance(inner, AsyncModbusTcpClient)
+        assert inner.comm_params.host == "10.0.0.1"
+        assert inner.comm_params.port == 502
 
     async def test_usb_serial(self) -> None:
         s = Settings(
@@ -37,9 +40,149 @@ class TestBuildClient:
             jkbms_path="/dev/ttyUSB0",
         )
         c = build_client(s)
-        assert isinstance(c, AsyncModbusSerialClient)
-        assert c.comm_params.host == "/dev/ttyUSB0"
-        assert c.comm_params.baudrate == JK_BAUD_RATE
+        assert isinstance(c, FrameGapClient)
+        inner = c.inner
+        assert isinstance(inner, AsyncModbusSerialClient)
+        assert inner.comm_params.host == "/dev/ttyUSB0"
+        assert inner.comm_params.baudrate == JK_BAUD_RATE
+
+    async def test_gap_comes_from_settings(self) -> None:
+        s = Settings(transport=Transport.TCP_GATEWAY, gateway_host="10.0.0.1",
+                     min_frame_gap_ms=35)
+        c = build_client(s)
+        assert isinstance(c, FrameGapClient)
+        assert c._min_gap_s == pytest.approx(0.035)
+
+
+# -- FrameGapClient ----------------------------------------------------------------------
+
+
+class _RecordingClient:
+    """Stands in for pymodbus; records calls and can raise on demand."""
+
+    def __init__(self, *, boom: Exception | None = None) -> None:
+        self.calls: list[tuple[str, dict]] = []
+        self.boom = boom
+        self.closed = False
+        self.connected = False
+
+    async def _record(self, name: str, **kw: object) -> str:
+        self.calls.append((name, dict(kw)))
+        if self.boom is not None:
+            raise self.boom
+        return f"{name}-response"
+
+    async def read_holding_registers(self, **kw: object) -> str:
+        return await self._record("read", **kw)
+
+    async def write_registers(self, **kw: object) -> str:
+        return await self._record("write_registers", **kw)
+
+    async def write_register(self, **kw: object) -> str:
+        return await self._record("write_register", **kw)
+
+    async def connect(self) -> bool:
+        self.connected = True
+        return True
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class _Clock:
+    """Deterministic monotonic clock that only advances when slept."""
+
+    def __init__(self) -> None:
+        self.t = 100.0
+        self.sleeps: list[float] = []
+
+    def now(self) -> float:
+        return self.t
+
+    async def sleep(self, d: float) -> None:
+        self.sleeps.append(d)
+        self.t += d
+
+
+def _gapped(inner: object, gap: float = 0.05) -> tuple[FrameGapClient, _Clock]:
+    clk = _Clock()
+    c = FrameGapClient(
+        inner,  # type: ignore[arg-type]
+        min_gap_s=gap, sleeper=clk.sleep, clock=clk.now,
+    )
+    return c, clk
+
+
+class TestFrameGapClient:
+    async def test_first_transaction_delegates_without_waiting(self) -> None:
+        """The bus has been idle since process start, so no gap is owed."""
+        inner = _RecordingClient()
+        c, clk = _gapped(inner)
+        result = await c.read_holding_registers(address=0x1000, count=2, device_id=1)
+        assert result == "read-response"
+        assert inner.calls == [("read", {"address": 0x1000, "count": 2, "device_id": 1})]
+        assert clk.sleeps == []
+
+    async def test_back_to_back_calls_are_spaced(self) -> None:
+        inner = _RecordingClient()
+        c, clk = _gapped(inner, gap=0.05)
+        await c.read_holding_registers(address=1, count=1, device_id=1)
+        clk.sleeps.clear()
+        await c.read_holding_registers(address=2, count=1, device_id=1)
+        # No time passed between them, so the whole gap must be slept.
+        assert clk.sleeps == [pytest.approx(0.05)]
+
+    async def test_no_sleep_when_the_bus_was_already_idle(self) -> None:
+        inner = _RecordingClient()
+        c, clk = _gapped(inner, gap=0.05)
+        await c.read_holding_registers(address=1, count=1, device_id=1)
+        clk.t += 1.0          # a long quiet period
+        clk.sleeps.clear()
+        await c.read_holding_registers(address=2, count=1, device_id=1)
+        assert clk.sleeps == []
+
+    async def test_gap_is_measured_after_a_failed_transaction_too(self) -> None:
+        """The finally clause must stamp _last_frame even when the call raises."""
+        inner = _RecordingClient(boom=TimeoutError("no reply"))
+        c, clk = _gapped(inner, gap=0.05)
+        with pytest.raises(TimeoutError):
+            await c.read_holding_registers(address=1, count=1, device_id=1)
+        clk.sleeps.clear()
+        with pytest.raises(TimeoutError):
+            await c.read_holding_registers(address=2, count=1, device_id=1)
+        assert clk.sleeps == [pytest.approx(0.05)]
+
+    async def test_write_paths_delegate(self) -> None:
+        inner = _RecordingClient()
+        c, _ = _gapped(inner)
+        assert await c.write_registers(address=0x1020, values=[0, 1], device_id=2) == (
+            "write_registers-response"
+        )
+        assert await c.write_register(address=0x1114, value=0x40, device_id=3) == (
+            "write_register-response"
+        )
+        assert [n for n, _ in inner.calls] == ["write_registers", "write_register"]
+        assert inner.calls[0][1] == {"address": 0x1020, "values": [0, 1], "device_id": 2}
+        assert inner.calls[1][1] == {"address": 0x1114, "value": 0x40, "device_id": 3}
+
+    async def test_connect_and_close_delegate(self) -> None:
+        inner = _RecordingClient()
+        c, _ = _gapped(inner)
+        assert await c.connect() is True
+        assert inner.connected is True
+        c.close()
+        assert inner.closed is True
+
+    async def test_concurrent_callers_are_serialised(self) -> None:
+        """Six runners share one client; the lock is what makes spacing mean anything."""
+        inner = _RecordingClient()
+        c, clk = _gapped(inner, gap=0.01)
+        await asyncio.gather(*(
+            c.read_holding_registers(address=i, count=1, device_id=i) for i in range(1, 7)
+        ))
+        assert len(inner.calls) == 6
+        # The first call owes nothing; each of the other five waits out the gap.
+        assert clk.sleeps == [pytest.approx(0.01)] * 5
 
 
 # -- connect_with_backoff ----------------------------------------------------------------

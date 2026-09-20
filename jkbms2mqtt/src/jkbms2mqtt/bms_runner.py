@@ -21,11 +21,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
+from jkbms2mqtt.entities import PACKED_BIT_ENTITIES, WRITABLE_ENTITIES
 from jkbms2mqtt.mqtt import (
     build_discovery_messages,
     render,
@@ -51,6 +53,8 @@ from jkbms2mqtt.protocol.jk_settings import (
     SETTINGS_BLOCK_CHUNKS,
     SETTINGS_BLOCK_WORDS,
     EncodeError,
+    PackedBitDef,
+    RegisterDef,
     decode_packed_bit_value,
     decode_register_value,
 )
@@ -58,6 +62,7 @@ from jkbms2mqtt.protocol.jk_settings import (
 if TYPE_CHECKING:
     from jkbms2mqtt.config import Settings
     from jkbms2mqtt.transport import ModbusClient
+    from jkbms2mqtt.write_ledger import WriteLedger
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +72,15 @@ BLOCK_B_OFFSET = 0x78
 BLOCK_B_COUNT = 50
 BLOCK_C_OFFSET = 0xF0
 BLOCK_C_COUNT = 16
+
+# Which entity a settings register / packed bit belongs to, so a capture can be
+# matched against the write ledger by object_id (#34).
+_OBJECT_ID_BY_REGISTER: dict[RegisterDef, str] = {
+    w.register: w.object_id for w in WRITABLE_ENTITIES
+}
+_OBJECT_ID_BY_BIT: dict[PackedBitDef, str] = {
+    p.bit: p.object_id for p in PACKED_BIT_ENTITIES
+}
 
 PublishFn = Callable[[str, str, int, bool], Awaitable[None]]
 """``(topic, payload, qos, retain) -> None``."""
@@ -82,6 +96,9 @@ class BmsRunner:
     bms_name: str
     publish: PublishFn
     clock: Callable[[], datetime] = field(default=lambda: datetime.now(UTC))
+    # Shared with the WriteExecutor; when set, a settings capture that a write
+    # has superseded is dropped rather than published over the echo (#34).
+    ledger: WriteLedger | None = None
 
     _cell_count: int = field(default=16, init=False)
     _discovery_announced: bool = field(default=False, init=False)
@@ -267,6 +284,9 @@ class BmsRunner:
             for i, v in enumerate(resp.registers[:chunk_count]):
                 regs[off + i] = v
                 read_addresses.add(chunk_addr + i)
+        # Stamp the moment this data left the BMS. Everything published below
+        # describes the bus as it was *here*, not as it is when we publish.
+        settings_captured_at = time.monotonic()
 
         # Log first outcome at INFO/WARNING — silent failure here is the most
         # common reason settings show as "unknown" in HA, so the user needs to
@@ -291,7 +311,7 @@ class BmsRunner:
                 self.slave_addr, "; ".join(failures),
             )
 
-        register_values: dict[object, float | bool] = {}
+        register_values: dict[RegisterDef, float | bool] = {}
         for r in (*BASIC_REGISTERS, *SAFETY_REGISTERS):
             # Only decode if both words of this 32-bit setting were actually read.
             if r.address not in read_addresses or (r.address + 1) not in read_addresses:
@@ -302,7 +322,7 @@ class BmsRunner:
                 logger.debug("BMS %d: cannot decode %s: %s", self.slave_addr, r.name, exc)
 
         # Packed-bit register lives outside the contiguous settings block.
-        packed_values: dict[object, bool] = {}
+        packed_values: dict[PackedBitDef, bool] = {}
         try:
             packed_resp = await self.client.read_holding_registers(
                 address=PACKED_BIT_REGISTER, count=1, device_id=self.slave_addr,
@@ -316,10 +336,33 @@ class BmsRunner:
                 raw = packed_resp.registers[0]
                 for bit in PACKED_BITS:
                     packed_values[bit] = decode_packed_bit_value(bit, raw)
+        packed_captured_at = time.monotonic()
+
+        # Drop anything a write has superseded since we captured it. The write
+        # executor has already echoed the new value; republishing the older
+        # capture on top of it is what makes a successful write look like it
+        # failed (#34). Ordering decides this, never a value comparison — a
+        # stale capture is a genuinely different value and would sail through
+        # any change filter.
+        if self.ledger is not None:
+            register_values = {
+                reg: value
+                for reg, value in register_values.items()
+                if not self.ledger.written_since(
+                    self.bms_name, _OBJECT_ID_BY_REGISTER[reg], settings_captured_at
+                )
+            }
+            packed_values = {
+                bit: value
+                for bit, value in packed_values.items()
+                if not self.ledger.written_since(
+                    self.bms_name, _OBJECT_ID_BY_BIT[bit], packed_captured_at
+                )
+            }
 
         for topic, payload in state_messages_from_settings(
-            register_values=register_values,  # type: ignore[arg-type]
-            packed_values=packed_values,       # type: ignore[arg-type]
+            register_values=register_values,
+            packed_values=packed_values,
             bms_name=self.bms_name,
             debug_unverified=self.settings.debug_unverified_fields,
         ):

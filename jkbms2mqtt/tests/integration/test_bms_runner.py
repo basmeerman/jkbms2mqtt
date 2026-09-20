@@ -574,6 +574,67 @@ async def test_settings_block_state_published() -> None:
     assert "BMS_1/control/smart_sleep_switch" not in by_topic
 
 
+def _settings_client_for_guard() -> FakeClient:
+    block = _settings_block_with(max_charge_a=40.0, smart_sleep_v=3.5)
+    return FakeClient(
+        map={
+            (1, BASE_RT): FakeResponse(registers=_block_a_for_pack_at(voltage_v=53.0, soc=50)),
+            (1, PACKED_BIT_REGISTER): FakeResponse(registers=[0x0040]),
+            **_settings_chunk_map(1, block),
+        }
+    )
+
+
+async def test_write_ledger_suppresses_a_superseded_settings_capture() -> None:
+    """A capture older than a successful write must not publish over its echo.
+
+    This is the #34 flip: the executor echoes the new value, then the poll
+    republishes the value it read moments earlier and Home Assistant appears
+    to revert. Only the written parameter is dropped.
+    """
+    from jkbms2mqtt.write_ledger import WriteLedger
+
+    pub = PublishCapture()
+    # A clock far in the future, so the mark is later than any real capture.
+    ledger = WriteLedger(clock=lambda: 1e18)
+    ledger.mark("BMS_1", "max_charge_current")
+    runner = BmsRunner(
+        client=_settings_client_for_guard(),  # type: ignore[arg-type]
+        settings=_settings(),
+        slave_addr=1,
+        bms_name="BMS_1",
+        publish=pub,
+        ledger=ledger,
+    )
+    await runner._poll_once()
+
+    by_topic = {t: p for t, p, _, _ in pub.log}
+    assert "BMS_1/control/max_charge_current" not in by_topic
+    # Untouched parameters are unaffected — the guard is per-parameter.
+    assert by_topic.get("BMS_1/control/smart_sleep_voltage") == "3.500"
+
+
+async def test_write_ledger_keeps_a_capture_taken_after_the_write() -> None:
+    """The guard must not hide a real reading, or failed writes become invisible."""
+    from jkbms2mqtt.write_ledger import WriteLedger
+
+    pub = PublishCapture()
+    ledger = WriteLedger(clock=lambda: 0.0)   # every mark predates any capture
+    ledger.mark("BMS_1", "max_charge_current")
+    runner = BmsRunner(
+        client=_settings_client_for_guard(),  # type: ignore[arg-type]
+        settings=_settings(),
+        slave_addr=1,
+        bms_name="BMS_1",
+        publish=pub,
+        ledger=ledger,
+    )
+    await runner._poll_once()
+
+    by_topic = {t: p for t, p, _, _ in pub.log}
+    assert by_topic.get("BMS_1/control/max_charge_current") == "40.000"
+
+
 def _settings_chunk_addrs() -> tuple[int, ...]:
     return tuple(addr for addr, _ in SETTINGS_BLOCK_CHUNKS)
 

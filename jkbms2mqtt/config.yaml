@@ -35,6 +35,7 @@ options:
   bms_ids: "1"
   topology: master_poll
   poll_interval_s: 5.0
+  min_frame_gap_ms: 50
   mqtt_host: core-mosquitto.local.hass.io
   mqtt_port: 1883
   mqtt_user: ""
@@ -60,6 +61,10 @@ schema:
   bms_ids: match(^\s*\d+(\s*,\s*\d+)*\s*$)
   topology: list(master_poll)
   poll_interval_s: float(1,60)
+  # Silent interval between Modbus frames. RTU needs a gap; without one the BMS
+  # ignores the request and only pymodbus's retry succeeds, costing ~3 s per
+  # read. 35 ms is the measured threshold on PB2A16S20P; 50 ms leaves margin.
+  min_frame_gap_ms: int(0,500)
   mqtt_host: str
   mqtt_port: port
   mqtt_user: str
