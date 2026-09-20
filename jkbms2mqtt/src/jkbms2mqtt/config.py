@@ -71,6 +71,14 @@ class Settings(BaseModel):
     discovery_prefix: str = "homeassistant"
     bms_name_prefix: str = "BMS"
 
+    # Home Assistant's birth/will topic. HA publishes "online" here when it
+    # starts, which is the bridge's cue to re-announce discovery and re-send
+    # every retained value — HA may have restarted against a broker that lost
+    # its retained set. This is a separate HA setting from the discovery
+    # prefix even though both default to "homeassistant"; set it to "" to
+    # disable the behaviour.
+    ha_status_topic: str = "homeassistant/status"
+
     enable_basic_writes: bool = False
     enable_safety_writes: bool = False
 

@@ -64,6 +64,19 @@ def configure_logging(settings: Settings) -> None:
 DISCOVERY_SETTLE_S = 2.0
 
 
+def is_ha_birth(topic: str, payload: str, status_topic: str) -> bool:
+    """True when *topic*/*payload* is Home Assistant announcing it has started.
+
+    HA publishes ``online`` to its birth topic (``homeassistant/status`` by
+    default) on start, and ``offline`` as its will. Only the birth interests
+    us: it means HA has just resubscribed and may be missing state, so the
+    bridge re-announces everything. An empty ``status_topic`` disables this.
+    """
+    if not status_topic:
+        return False
+    return topic == status_topic and payload.strip().lower() == "online"
+
+
 async def _clean_orphaned_discovery(  # pragma: no cover - MQTT glue
     mqtt: MqttClient, settings: Settings
 ) -> None:
@@ -194,6 +207,13 @@ async def _run_session(  # pragma: no cover - top-level glue
             for suffix in lookup:
                 await mqtt.subscribe(f"{r.bms_name}/{suffix}", qos=1)
 
+        # HA's birth message. Its retained state can outlive a Home Assistant
+        # restart, but not a broker that lost it — and the bridge cannot tell
+        # the difference from here, so it re-sends everything when HA says it
+        # is back.
+        if settings.ha_status_topic:
+            await mqtt.subscribe(settings.ha_status_topic, qos=1)
+
         tasks: list[asyncio.Task[None]] = [
             asyncio.create_task(r.poll_loop()) for r in runners
         ]
@@ -203,6 +223,15 @@ async def _run_session(  # pragma: no cover - top-level glue
             lookup = writable_by_command_topic_suffix()
             async for message in mqtt.messages:
                 topic = str(message.topic)
+                payload = bytes(message.payload).decode(errors="replace")
+                if is_ha_birth(topic, payload, settings.ha_status_topic):
+                    logger.info(
+                        "Home Assistant is online — re-announcing discovery and "
+                        "re-sending all retained state"
+                    )
+                    for r in runners:
+                        await r.resend_all()
+                    continue
                 bms_name, _, suffix = topic.partition("/")
                 runner = bms_by_name.get(bms_name)
                 if runner is None:
@@ -215,7 +244,7 @@ async def _run_session(  # pragma: no cover - top-level glue
                         bms_name=bms_name,
                         slave_addr=runner.slave_addr,
                         object_id=entity.object_id,
-                        raw_payload=bytes(message.payload).decode(errors="replace"),
+                        raw_payload=payload,
                     )
                 )
 

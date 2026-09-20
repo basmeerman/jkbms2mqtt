@@ -42,6 +42,7 @@ options:
   mqtt_password: ""
   discovery_prefix: homeassistant
   bms_name_prefix: BMS
+  ha_status_topic: homeassistant/status
   enable_basic_writes: false
   enable_safety_writes: false
   debug_unverified_fields: false
@@ -71,6 +72,10 @@ schema:
   mqtt_password: password
   discovery_prefix: str
   bms_name_prefix: str
+  # Home Assistant's birth/will topic. "online" here means HA restarted, so the
+  # bridge re-announces discovery and re-sends all retained state. Separate
+  # from discovery_prefix in HA's own settings. Empty disables it.
+  ha_status_topic: str
   enable_basic_writes: bool
   enable_safety_writes: bool
   debug_unverified_fields: bool

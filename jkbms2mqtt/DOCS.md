@@ -58,6 +58,7 @@ Two supported transports between the bus and this add-on:
 | `mqtt_user` / `mqtt_password` | empty | Only needed if your broker requires auth. |
 | `discovery_prefix` | `homeassistant` | HA MQTT discovery prefix. |
 | `bms_name_prefix` | `BMS` | Devices appear as `BMS_<n>`. |
+| `ha_status_topic` | `homeassistant/status` | Home Assistant's birth/will topic. When HA publishes `online` there — i.e. it has just restarted — the bridge re-announces discovery and re-sends every retained value, so nothing is missing if the broker lost its retained set. This is a separate setting inside Home Assistant from the discovery prefix, even though both default to `homeassistant`; change it here to match if you changed it there. Set to empty to disable. |
 | `enable_basic_writes` | `false` | Allow writes to operational settings (charge/discharge/balance switches, balance thresholds, etc.). Off by default. |
 | `enable_safety_writes` | `false` | Allow writes to safety-critical thresholds (OVP/UVP, max charge/discharge current, OTP/UTP). Off by default — a wrong value here can damage cells. |
 | `log_level` | `info` | Dropdown: `debug`, `info`, `warning`, `error`. |

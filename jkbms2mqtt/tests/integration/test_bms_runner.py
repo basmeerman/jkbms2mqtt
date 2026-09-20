@@ -697,6 +697,26 @@ async def test_force_full_republish_resends_retained_state() -> None:
     assert "BMS_1/control/max_charge_current" in _control_topics(pub)
 
 
+async def test_resend_all_reannounces_discovery_and_retained_state() -> None:
+    """What the bridge does when Home Assistant announces it has restarted."""
+    client = _settings_client_for_guard()
+    pub = PublishCapture()
+    runner = BmsRunner(
+        client=client,  # type: ignore[arg-type]
+        settings=_settings(), slave_addr=1, bms_name="BMS_1", publish=pub,
+    )
+    await runner.announce_discovery()
+    await runner._poll_once()
+    pub.log.clear()
+
+    await runner.resend_all()
+    assert any("/config" in t for t, _, _, _ in pub.log), "discovery not re-announced"
+
+    pub.log.clear()
+    await runner._poll_once()
+    assert "BMS_1/control/max_charge_current" in _control_topics(pub)
+
+
 async def test_a_failed_publish_is_not_remembered() -> None:
     """Never record a value the broker may not have received."""
 

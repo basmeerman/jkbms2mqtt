@@ -117,6 +117,18 @@ class BmsRunner:
         """
         self._published.clear()
 
+    async def resend_all(self) -> None:
+        """Re-announce discovery and re-send every retained value next cycle.
+
+        Home Assistant publishes ``online`` to its birth topic when it starts.
+        The bridge's retained state may predate that, and HA may have restarted
+        against a broker that lost its retained set — from this side the two
+        are indistinguishable. Saying everything again is cheap and certain.
+        """
+        self.force_full_republish()
+        self._discovery_announced = False
+        await self.announce_discovery()
+
     async def _publish_retained(self, topic: str, payload: str, qos: int) -> None:
         """Publish a retained value only when it differs from the last one sent.
 
