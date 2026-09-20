@@ -766,6 +766,31 @@ class TestStateMessagesFromSettings:
         assert msgs["BMS_1/control/smart_sleep_voltage"] == "3.500"
         assert msgs["BMS_1/control/smart_sleep_switch"] == "ON"
 
+    def test_emits_on_off_for_bool32_switch_settings(self) -> None:
+        """The three MOSFET switches are BOOL32 registers, rendered ON/OFF.
+
+        This path runs on every poll cycle in production; it was previously
+        excluded from the coverage gate by a pragma claiming no BOOL32
+        register existed (issue #36).
+        """
+        from jkbms2mqtt.protocol.jk_settings import BASIC_REGISTERS, Encoding
+
+        charging = next(r for r in BASIC_REGISTERS if r.name == "charging_switch")
+        discharging = next(r for r in BASIC_REGISTERS if r.name == "discharging_switch")
+        balance = next(r for r in BASIC_REGISTERS if r.name == "balance_switch")
+        assert charging.encoding is Encoding.BOOL32
+
+        msgs = dict(
+            state_messages_from_settings(
+                register_values={charging: True, discharging: False, balance: True},
+                packed_values={},
+                bms_name="BMS_1",
+            )
+        )
+        assert msgs["BMS_1/control/charging_switch"] == "ON"
+        assert msgs["BMS_1/control/discharging_switch"] == "OFF"
+        assert msgs["BMS_1/control/balance_switch"] == "ON"
+
     def test_packed_bits_hidden_without_debug_flag(self) -> None:
         from jkbms2mqtt.protocol.jk_settings import PACKED_BITS
 

@@ -619,8 +619,9 @@ def state_messages_from_settings(
             continue
         value = register_values[w.register]
         topic = _state_topic(bms_name, w.topic_suffix)
-        if w.register.encoding is Encoding.BOOL32:  # pragma: no branch - no BOOL32 regs today
-            out.append((topic, "ON" if value else "OFF"))  # pragma: no cover
+        if w.register.encoding is Encoding.BOOL32:
+            # charging_switch / discharging_switch / balance_switch.
+            out.append((topic, "ON" if value else "OFF"))
         else:
             decimals = _decimals_for_encoding(w.register.encoding)
             out.append((topic, _format(value, decimals)))
