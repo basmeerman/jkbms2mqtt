@@ -58,12 +58,26 @@ class Settings(BaseModel):
     topology: Topology = Topology.MASTER_POLL
     poll_interval_s: Annotated[float, Field(ge=1.0, le=60.0)] = 5.0
 
+    # Minimum silent interval between Modbus frames. RTU needs a gap; without
+    # one the BMS ignores the request, pymodbus times out and only the retry
+    # succeeds — invisibly turning a ~25 ms read into a ~3 s one. Measured
+    # threshold on PB2A16S20P is 35 ms; 50 ms leaves margin. See transport.
+    min_frame_gap_ms: Annotated[int, Field(ge=0, le=500)] = 50
+
     mqtt_host: str = "core-mosquitto.local.hass.io"
     mqtt_port: Annotated[int, Field(ge=1, le=65535)] = 1883
     mqtt_user: str = ""
     mqtt_password: str = ""
     discovery_prefix: str = "homeassistant"
     bms_name_prefix: str = "BMS"
+
+    # Home Assistant's birth/will topic. HA publishes "online" here when it
+    # starts, which is the bridge's cue to re-announce discovery and re-send
+    # every retained value — HA may have restarted against a broker that lost
+    # its retained set. This is a separate HA setting from the discovery
+    # prefix even though both default to "homeassistant"; set it to "" to
+    # disable the behaviour.
+    ha_status_topic: str = "homeassistant/status"
 
     enable_basic_writes: bool = False
     enable_safety_writes: bool = False

@@ -52,11 +52,13 @@ Two supported transports between the bus and this add-on:
 | `bms_ids` | `1` | Comma-separated list of Modbus slave addresses (DIP-switch IDs) on the bus. E.g. `1,2,3,4,5,6` for a 6-pack array; non-contiguous like `2,5,7` is fine. Whitespace around commas is OK. |
 | `topology` | `master_poll` | Dropdown. (Currently the only mode for this protocol.) |
 | `poll_interval_s` | `5.0` | Seconds between poll cycles. |
+| `min_frame_gap_ms` | `50` | Minimum silent interval between Modbus frames. RS485 RTU needs a quiet period between requests; without one the BMS ignores the request and only pymodbus's retry succeeds, turning a ~25 ms read into a ~3 s one — invisibly, because the retry works and nothing is logged as failed. Measured threshold on a PB2A16S20P is 35 ms; `50` leaves margin. Raise it if you see slow or timing-out reads, lower it only if you have measured that your hardware tolerates it. |
 | `mqtt_host` | `core-mosquitto.local.hass.io` | The HA Mosquitto broker. |
 | `mqtt_port` | `1883` | |
 | `mqtt_user` / `mqtt_password` | empty | Only needed if your broker requires auth. |
 | `discovery_prefix` | `homeassistant` | HA MQTT discovery prefix. |
 | `bms_name_prefix` | `BMS` | Devices appear as `BMS_<n>`. |
+| `ha_status_topic` | `homeassistant/status` | Home Assistant's birth/will topic. When HA publishes `online` there — i.e. it has just restarted — the bridge re-announces discovery and re-sends every retained value, so nothing is missing if the broker lost its retained set. This is a separate setting inside Home Assistant from the discovery prefix, even though both default to `homeassistant`; change it here to match if you changed it there. Set to empty to disable. |
 | `enable_basic_writes` | `false` | Allow writes to operational settings (charge/discharge/balance switches, balance thresholds, etc.). Off by default. |
 | `enable_safety_writes` | `false` | Allow writes to safety-critical thresholds (OVP/UVP, max charge/discharge current, OTP/UTP). Off by default — a wrong value here can damage cells. |
 | `log_level` | `info` | Dropdown: `debug`, `info`, `warning`, `error`. |

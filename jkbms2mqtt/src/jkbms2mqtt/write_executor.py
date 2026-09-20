@@ -37,6 +37,7 @@ if TYPE_CHECKING:
     from jkbms2mqtt.config import Settings
     from jkbms2mqtt.entities import WritableEntity
     from jkbms2mqtt.transport import ModbusClient
+    from jkbms2mqtt.write_ledger import WriteLedger
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +82,9 @@ class WriteExecutor:
     client: ModbusClient
     settings: Settings
     publish: PublishFn
+    # Shared with the BmsRunners: lets a poll discard a capture that a write
+    # has already superseded, instead of republishing it over the echo (#34).
+    ledger: WriteLedger | None = None
 
     async def run(self, queue: asyncio.Queue[WriteRequest]) -> None:
         """Main loop: consume queue until cancelled."""
@@ -138,6 +142,10 @@ class WriteExecutor:
         if response is None:
             return  # error already published
 
+        # Mark before echoing: an in-flight poll capture is already stale.
+        if self.ledger is not None:
+            self.ledger.mark(req.bms_name, req.object_id)
+
         from jkbms2mqtt.mqtt import _format
 
         if entity.register.encoding is Encoding.BOOL32:
@@ -178,6 +186,9 @@ class WriteExecutor:
         )
         if response is None:
             return
+
+        if self.ledger is not None:
+            self.ledger.mark(req.bms_name, req.object_id)
 
         await self.publish(
             f"{req.bms_name}/{entity.topic_suffix}", "ON" if desired_on else "OFF"

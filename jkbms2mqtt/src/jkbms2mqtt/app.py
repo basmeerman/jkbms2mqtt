@@ -26,8 +26,9 @@ from jkbms2mqtt.mqtt import (
     render,
     tier_state_messages,
 )
-from jkbms2mqtt.transport import build_client, connect_with_backoff
+from jkbms2mqtt.transport import ModbusClient, build_client, connect_with_backoff
 from jkbms2mqtt.write_executor import WriteExecutor, WriteRequest
+from jkbms2mqtt.write_ledger import WriteLedger
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +62,19 @@ def configure_logging(settings: Settings) -> None:
 # end-of-retained marker, so this is a settle window: collection stops once
 # nothing new has arrived for this long.
 DISCOVERY_SETTLE_S = 2.0
+
+
+def is_ha_birth(topic: str, payload: str, status_topic: str) -> bool:
+    """True when *topic*/*payload* is Home Assistant announcing it has started.
+
+    HA publishes ``online`` to its birth topic (``homeassistant/status`` by
+    default) on start, and ``offline`` as its will. Only the birth interests
+    us: it means HA has just resubscribed and may be missing state, so the
+    bridge re-announces everything. An empty ``status_topic`` disables this.
+    """
+    if not status_topic:
+        return False
+    return topic == status_topic and payload.strip().lower() == "online"
 
 
 async def _clean_orphaned_discovery(  # pragma: no cover - MQTT glue
@@ -103,13 +117,28 @@ async def _clean_orphaned_discovery(  # pragma: no cover - MQTT glue
     )
 
 
-async def run(settings: Settings) -> None:  # pragma: no cover - top-level glue
-    """Run the bridge until SIGTERM / SIGINT."""
-    configure_logging(settings)
+# A dropped broker connection ends the session; aiomqtt does not reconnect on
+# its own, so `run` rebuilds it with this backoff (#35).
+MQTT_INITIAL_BACKOFF_S = 1.0
+MQTT_MAX_BACKOFF_S = 30.0
 
-    client = build_client(settings)
-    await connect_with_backoff(client)
 
+async def _run_session(  # pragma: no cover - top-level glue
+    settings: Settings,
+    client: ModbusClient,
+    ledger: WriteLedger,
+    shutdown_event: asyncio.Event,
+) -> None:
+    """One MQTT connection's lifetime: publish, subscribe, poll until it ends.
+
+    Returns normally only when shutdown was requested. Any other exit — the
+    broker dropping, a poll task raising — propagates, so the caller can
+    rebuild the session rather than limping on with dead tasks.
+
+    The runners are constructed here on purpose: a reconnect therefore
+    re-announces discovery and republishes every state topic, because a broker
+    that restarted may have lost its retained set.
+    """
     will = Will(topic=BRIDGE_AVAILABILITY_TOPIC, payload=b"offline", qos=1, retain=True)
     async with MqttClient(
         hostname=settings.mqtt_host,
@@ -143,15 +172,24 @@ async def run(settings: Settings) -> None:  # pragma: no cover - top-level glue
                 slave_addr=sid,
                 bms_name=f"{settings.bms_name_prefix}_{sid}",
                 publish=publish,
+                ledger=ledger,
             )
             for sid in settings.bms_ids
         ]
         bms_by_name = {r.bms_name: r for r in runners}
 
+        # A new session means a possibly-new broker: re-send every retained
+        # value rather than trusting a retained set that may not have survived.
+        # Runners are built per session so their caches are already empty; this
+        # states the guarantee rather than relying on where they are created.
+        for r in runners:
+            r.force_full_republish()
+
         # Single write queue, single executor task
         write_queue: asyncio.Queue[WriteRequest] = asyncio.Queue()
         executor = WriteExecutor(
-            client=client, settings=settings, publish=publish_write_output
+            client=client, settings=settings, publish=publish_write_output,
+            ledger=ledger,
         )
 
         # Opt-in: clear retained discovery configs of packs that are no longer
@@ -169,11 +207,12 @@ async def run(settings: Settings) -> None:  # pragma: no cover - top-level glue
             for suffix in lookup:
                 await mqtt.subscribe(f"{r.bms_name}/{suffix}", qos=1)
 
-        # Signal handling
-        loop = asyncio.get_event_loop()
-        shutdown_event = asyncio.Event()
-        loop.add_signal_handler(signal.SIGTERM, shutdown_event.set)
-        loop.add_signal_handler(signal.SIGINT, shutdown_event.set)
+        # HA's birth message. Its retained state can outlive a Home Assistant
+        # restart, but not a broker that lost it — and the bridge cannot tell
+        # the difference from here, so it re-sends everything when HA says it
+        # is back.
+        if settings.ha_status_topic:
+            await mqtt.subscribe(settings.ha_status_topic, qos=1)
 
         tasks: list[asyncio.Task[None]] = [
             asyncio.create_task(r.poll_loop()) for r in runners
@@ -184,6 +223,15 @@ async def run(settings: Settings) -> None:  # pragma: no cover - top-level glue
             lookup = writable_by_command_topic_suffix()
             async for message in mqtt.messages:
                 topic = str(message.topic)
+                payload = bytes(message.payload).decode(errors="replace")
+                if is_ha_birth(topic, payload, settings.ha_status_topic):
+                    logger.info(
+                        "Home Assistant is online — re-announcing discovery and "
+                        "re-sending all retained state"
+                    )
+                    for r in runners:
+                        await r.resend_all()
+                    continue
                 bms_name, _, suffix = topic.partition("/")
                 runner = bms_by_name.get(bms_name)
                 if runner is None:
@@ -196,18 +244,72 @@ async def run(settings: Settings) -> None:  # pragma: no cover - top-level glue
                         bms_name=bms_name,
                         slave_addr=runner.slave_addr,
                         object_id=entity.object_id,
-                        raw_payload=bytes(message.payload).decode(errors="replace"),
+                        raw_payload=payload,
                     )
                 )
 
         tasks.append(asyncio.create_task(dispatch()))
 
-        await shutdown_event.wait()
-        for t in tasks:
-            t.cancel()
-        await asyncio.gather(*tasks, return_exceptions=True)
+        # Wait for whichever comes first: shutdown, or a task falling over.
+        # Previously only `shutdown_event` was awaited, so a task that raised
+        # died unnoticed — its exception sat unretrieved until the shutdown
+        # gather swallowed it, and that pack silently stopped updating (#35).
+        waiter = asyncio.create_task(shutdown_event.wait())
+        try:
+            done, _ = await asyncio.wait(
+                [*tasks, waiter], return_when=asyncio.FIRST_COMPLETED
+            )
+        finally:
+            for task in (*tasks, waiter):
+                task.cancel()
+            await asyncio.gather(*tasks, waiter, return_exceptions=True)
 
-    client.close()
+        for task in done:
+            if task is waiter or task.cancelled():
+                continue
+            exc = task.exception()
+            if exc is not None:
+                raise exc
+            raise RuntimeError("a bridge task exited unexpectedly")
+
+
+async def run(settings: Settings) -> None:  # pragma: no cover - top-level glue
+    """Run the bridge until SIGTERM / SIGINT, rebuilding the session as needed."""
+    configure_logging(settings)
+
+    client = build_client(settings)
+    await connect_with_backoff(client)
+
+    loop = asyncio.get_event_loop()
+    shutdown_event = asyncio.Event()
+    loop.add_signal_handler(signal.SIGTERM, shutdown_event.set)
+    loop.add_signal_handler(signal.SIGINT, shutdown_event.set)
+
+    # Outlives the MQTT session: a reconnect must not forget which parameters
+    # were written, or the first poll afterwards could republish a stale one.
+    ledger = WriteLedger()
+
+    backoff = MQTT_INITIAL_BACKOFF_S
+    try:
+        while not shutdown_event.is_set():
+            try:
+                await _run_session(settings, client, ledger, shutdown_event)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.warning(
+                    "bridge session ended (%s: %s) — restarting in %.1fs",
+                    type(exc).__name__, exc, backoff,
+                )
+                try:
+                    await asyncio.wait_for(shutdown_event.wait(), timeout=backoff)
+                except TimeoutError:
+                    pass  # backoff elapsed; go round again
+                backoff = min(backoff * 2, MQTT_MAX_BACKOFF_S)
+            else:
+                backoff = MQTT_INITIAL_BACKOFF_S
+    finally:
+        client.close()
 
 
 def _install_dashboard(  # pragma: no cover - add-on glue
